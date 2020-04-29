@@ -24,16 +24,20 @@ var DiscordToken string
 var AudDToken string
 
 func main() {
+	// Get a token from the Telegram bot: https://t.me/auddbot?start=api and copy it to AudDToken
+	AudDToken = ""
+
 	// Create an application here: https://discordapp.com/developers/applications
 	// Copy the secret to DiscordToken and get the Client ID
-	// Then create a bot, open https://discordapp.com/api/oauth2/authorize?client_id=<INSERT CLIENT ID HERE>&permissions=1049088&scope=bot
-	// And add the bot to the server. To recognize a song from a voice channel, type !song or !recognize.
-	// It's better to also mention users who are playing the song (like !song @MusicGuy).
-	// If you want the bot to listen to a channel so it can immediately recognize the song from the last 15 second of audio, type !listen.
 	DiscordToken = ""
 
-	// Get a token from the Telegram bot: https://t.me/auddbot?start=api
-	AudDToken = ""
+	// Create a bot for your Discord application
+	// Run this code (e.g. go run main.go)
+	// Open https://discordapp.com/api/oauth2/authorize?client_id=<INSERT CLIENT ID HERE>&permissions=1049088&scope=bot and add the bot to a server
+
+	// To recognize a song from a voice channel, type !song or !recognize.
+	// It's better to mention users who are playing the song (like !song @MusicGuy).
+	// If you want the bot to listen to a channel so it can immediately recognize the song from the last 15 second of audio, type !listen.
 
 	dg, err := discordgo.New("Bot " + DiscordToken)
 	if capture(err) {
