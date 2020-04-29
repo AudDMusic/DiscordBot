@@ -5,7 +5,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"github.com/AudDMusic/audd-go"
-	"github.com/bwmarrin/dgvoice"
+	"github.com/Mihonarium/dgvoice"
 	"github.com/cryptix/wav"
 	"github.com/getsentry/raven-go"
 	"io/ioutil"
