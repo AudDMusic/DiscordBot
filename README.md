@@ -8,7 +8,7 @@ A music recognition bot for Discord. Uses the [Music Recognition API](https://au
 - Create an application here: https://discordapp.com/developers/applications
 - Copy the secret to the DiscordToken variable and get the Client ID
 - Create a bot
-- Open https://discordapp.com/api/oauth2/authorize?client_id=<INSERT CLIENT ID HERE>&permissions=1049088&scope=bot and add the bot to a server
+- Open `https://discordapp.com/api/oauth2/authorize?client_id=<INSERT CLIENT ID HERE>&permissions=1049088&scope=bot` and add the bot to a server
 - Run the bot
 
 ## How to use it
