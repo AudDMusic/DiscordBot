@@ -11,5 +11,5 @@ A music recognition bot for Discord. Uses the [Music Recognition API](https://au
 
 ## How to use it
 - To recognize a song from a voice channel, type !song or !recognize
-- It's better to also mention users who are playing the song (like !song @MusicGuy)
+- It's better to also mention users who are playing the song (like !song @MusicBot)
 - If you want the bot to listen to a channel so it can immediately recognize the song from the last 15 second of audio, type !listen.
