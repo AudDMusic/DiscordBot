@@ -36,7 +36,7 @@ func main() {
 	// Open https://discordapp.com/api/oauth2/authorize?client_id=<INSERT CLIENT ID HERE>&permissions=1049088&scope=bot and add the bot to a server
 
 	// To recognize a song from a voice channel, type !song or !recognize.
-	// It's better to mention users who are playing the song (like !song @MusicGuy).
+	// It's better to mention users who are playing the song (like !song @MusicBot).
 	// If you want the bot to listen to a channel so it can immediately recognize the song from the last 15 second of audio, type !listen.
 
 	dg, err := discordgo.New("Bot " + DiscordToken)
