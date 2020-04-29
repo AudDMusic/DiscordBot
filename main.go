@@ -29,7 +29,7 @@ func main() {
 	// Then create a bot, open https://discordapp.com/api/oauth2/authorize?client_id=<INSERT CLIENT ID HERE>&permissions=1049088&scope=bot
 	// And add the bot to the server. To recognize a song from a voice channel, type !song or !recognize.
 	// It's better to also mention users who are playing the song (like !song @MusicGuy).
-	// If you want the bot to listen to a channel so it can immediately recognize the song from the last 15 second of audio, type !listen. 
+	// If you want the bot to listen to a channel so it can immediately recognize the song from the last 15 second of audio, type !listen.
 	DiscordToken = ""
 
 	// Get a token from the Telegram bot: https://t.me/auddbot?start=api
@@ -62,7 +62,6 @@ type serverBuffer struct {
 	buf       chan *discordgo.Packet
 	start     chan struct{}
 	stop      chan struct{}
-	Stopped   bool
 	LastUsers []string
 }
 
@@ -71,7 +70,6 @@ func (v *serverBuffer) Start() {
 }
 func (v *serverBuffer) Stop() {
 	v.stop <- struct{}{}
-	v.Stopped = true
 }
 
 var serverBuffers = map[string]serverBuffer{}
@@ -163,7 +161,8 @@ func guildCreate(s *discordgo.Session, event *discordgo.GuildCreate) {
 	}
 	for _, channel := range event.Guild.Channels {
 		if channel.ID == event.Guild.ID {
-			_, _ = s.ChannelMessageSend(channel.ID, "Type !song or !recognize while in a voice channel to start music recognition.\n"+
+			_, _ = s.ChannelMessageSend(channel.ID, "Type !song or !recognize while in a voice channel to start music recognition.\n" +
+				"Type !listen while in a voice channel, and I'll listen to the channel and immediately recognize the song from the last 15 second of audio when you type !song or !recognize.\n"+
 				"Powered by https://audd.io Music Recognition API :wink: ")
 			return
 		}
@@ -397,7 +396,7 @@ func startBuffer(s *discordgo.Session, guildID, channelID string) (serverBuffer,
 	}
 
 	audioBuf, started, stop := listenBuffer(recv, time.Second*15, onClose)
-	return serverBuffer{audioBuf, started, stop, false, []string{}}, nil
+	return serverBuffer{audioBuf, started, stop, []string{}}, nil
 }
 
 
