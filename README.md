@@ -1,6 +1,8 @@
 # discord-bot
 A music recognition bot for Discord. Uses the [Music Recognition API](https://audd.io/).
 
+![Discord bot](https://audd.tech/discord.jpg)
+
 ## How to run it:
 - Get a token from [AudD Telegram bot](https://t.me/auddbot?start=api) and copy it to the AudDToken variable
 - Create an application here: https://discordapp.com/developers/applications
