@@ -7,7 +7,6 @@ import (
 	"github.com/AudDMusic/audd-go"
 	"github.com/Mihonarium/dgvoice"
 	"github.com/cryptix/wav"
-	"github.com/getsentry/raven-go"
 	"io/ioutil"
 	"os"
 	"os/signal"
@@ -412,7 +411,8 @@ func capture(err error) bool {
 	if ok {
 		err = fmt.Errorf("%v from %s#%d", err, file, no)
 	}
-	go raven.CaptureError(err, nil)
+	//go raven.CaptureError(err, nil)
+	go fmt.Println(err)
 	return true
 }
 func captureFunc(f func() error) (r bool) {
