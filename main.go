@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/AudDMusic/audd-go"
-	"github.com/bwmarrin/dgvoice"
+	"github.com/Mihonarium/dgvoice"
 	"github.com/cryptix/wav"
 	"io/ioutil"
 	"os"
@@ -36,7 +36,7 @@ func main() {
 	// Open https://discordapp.com/api/oauth2/authorize?client_id=<INSERT CLIENT ID HERE>&permissions=1049088&scope=bot and add the bot to a server
 
 	// To recognize a song from a voice channel, type !song or !recognize.
-	// It's better to mention users who are playing the song (like !song @MusicGuy).
+	// It's better to mention users who are playing the song (like !song @SomeRandomMusicBot).
 	// If you want the bot to listen to a channel so it can immediately recognize the song from the last 15 second of audio, type !listen.
 
 	dg, err := discordgo.New("Bot " + DiscordToken)
@@ -83,8 +83,6 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 	if m.Author.ID == s.State.User.ID {
 		return
 	}
-	b, _ := json.Marshal(m)
-	fmt.Println(string(b))
 	if strings.HasPrefix(m.Content, "!recognize") || strings.HasPrefix(m.Content, "!song") {
 		Users := make([]string, 0)
 		if len(m.Mentions) > 0 {
