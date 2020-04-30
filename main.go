@@ -3,9 +3,10 @@ package main
 import (
 	"bytes"
 	"encoding/binary"
+	"encoding/json"
 	"fmt"
 	"github.com/AudDMusic/audd-go"
-	"github.com/Mihonarium/dgvoice"
+	"github.com/bwmarrin/dgvoice"
 	"github.com/cryptix/wav"
 	"io/ioutil"
 	"os"
@@ -35,7 +36,7 @@ func main() {
 	// Open https://discordapp.com/api/oauth2/authorize?client_id=<INSERT CLIENT ID HERE>&permissions=1049088&scope=bot and add the bot to a server
 
 	// To recognize a song from a voice channel, type !song or !recognize.
-	// It's better to mention users who are playing the song (like !song @MusicBot).
+	// It's better to mention users who are playing the song (like !song @MusicGuy).
 	// If you want the bot to listen to a channel so it can immediately recognize the song from the last 15 second of audio, type !listen.
 
 	dg, err := discordgo.New("Bot " + DiscordToken)
@@ -82,6 +83,8 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 	if m.Author.ID == s.State.User.ID {
 		return
 	}
+	b, _ := json.Marshal(m)
+	fmt.Println(string(b))
 	if strings.HasPrefix(m.Content, "!recognize") || strings.HasPrefix(m.Content, "!song") {
 		Users := make([]string, 0)
 		if len(m.Mentions) > 0 {
@@ -125,9 +128,45 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 					return
 				}
 				if result.Title != "" {
-					_, _ = s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("Recognized! It's `%s - %s`\n\n"+
-						"Listen: %s [plays on %s]",
-						result.Artist, result.Title, result.SongLink, result.Timecode))
+					_, err := s.ChannelMessageSendEmbed(m.ChannelID, &discordgo.MessageEmbed{
+						URL:         result.SongLink,
+						Type:        "",
+						Title:       result.Title,
+						Description: "By "+result.Artist,
+						Color:       3066993,
+						Footer:      &discordgo.MessageEmbedFooter{
+							Text:         "Powered by AudD Music Recognition API",
+							IconURL:      "https://audd.io/logo_t.png",
+						},
+						Image:       &discordgo.MessageEmbedImage{
+							URL:      result.SongLink+"?thumb",
+						},
+						Thumbnail:   nil,
+						Author:      nil,
+						Fields:      []*discordgo.MessageEmbedField{
+							{
+								Name:   "Plays on",
+								Value:  result.Timecode,
+								Inline: true,
+							},
+							{
+								Name:   "Album",
+								Value:  result.Album,
+								Inline: true,
+							},
+							{
+								Name:   "Label",
+								Value:  result.Label,
+								Inline: true,
+							},
+							{
+								Name:   "Released",
+								Value:  result.ReleaseDate,
+								Inline: true,
+							},
+						},
+					})
+					capture(err)
 				} else {
 					_, _ = s.ChannelMessageSend(m.ChannelID, "Couldn't recognize the song")
 				}
@@ -165,8 +204,7 @@ func guildCreate(s *discordgo.Session, event *discordgo.GuildCreate) {
 	for _, channel := range event.Guild.Channels {
 		if channel.ID == event.Guild.ID {
 			_, _ = s.ChannelMessageSend(channel.ID, "Type !song or !recognize while in a voice channel to start music recognition.\n" +
-				"Type !listen while in a voice channel, and I'll listen to the channel and immediately recognize the song from the last 15 second of audio when you type !song or !recognize.\n"+
-				"Powered by https://audd.io Music Recognition API :wink: ")
+				"Type !listen while in a voice channel, and I'll join it so when you type !song or !recognize I'll immediately recognize the song .")
 			return
 		}
 	}
