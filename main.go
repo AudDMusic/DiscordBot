@@ -3,7 +3,6 @@ package main
 import (
 	"bytes"
 	"encoding/binary"
-	"encoding/json"
 	"fmt"
 	"github.com/AudDMusic/audd-go"
 	"github.com/Mihonarium/dgvoice"
@@ -130,18 +129,18 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 						URL:         result.SongLink,
 						Type:        "",
 						Title:       result.Title,
-						Description: "By "+result.Artist,
+						Description: "By " + result.Artist,
 						Color:       3066993,
-						Footer:      &discordgo.MessageEmbedFooter{
-							Text:         "Powered by AudD Music Recognition API",
-							IconURL:      "https://audd.io/logo_t.png",
+						Footer: &discordgo.MessageEmbedFooter{
+							Text:    "Powered by AudD Music Recognition API",
+							IconURL: "https://audd.io/logo_t.png",
 						},
-						Image:       &discordgo.MessageEmbedImage{
-							URL:      result.SongLink+"?thumb",
+						Image: &discordgo.MessageEmbedImage{
+							URL: result.SongLink + "?thumb",
 						},
-						Thumbnail:   nil,
-						Author:      nil,
-						Fields:      []*discordgo.MessageEmbedField{
+						Thumbnail: nil,
+						Author:    nil,
+						Fields: []*discordgo.MessageEmbedField{
 							{
 								Name:   "Plays on",
 								Value:  result.Timecode,
@@ -201,7 +200,7 @@ func guildCreate(s *discordgo.Session, event *discordgo.GuildCreate) {
 	}
 	for _, channel := range event.Guild.Channels {
 		if channel.ID == event.Guild.ID {
-			_, _ = s.ChannelMessageSend(channel.ID, "Type !song or !recognize while in a voice channel to start music recognition.\n" +
+			_, _ = s.ChannelMessageSend(channel.ID, "Type !song or !recognize while in a voice channel to start music recognition.\n"+
 				"Type !listen while in a voice channel, and I'll join it so when you type !song or !recognize I'll immediately recognize the song .")
 			return
 		}
@@ -437,7 +436,6 @@ func startBuffer(s *discordgo.Session, guildID, channelID string) (serverBuffer,
 	audioBuf, started, stop := listenBuffer(recv, time.Second*15, onClose)
 	return serverBuffer{audioBuf, started, stop, []string{}}, nil
 }
-
 
 func capture(err error) bool {
 	if err == nil {
