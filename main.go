@@ -27,7 +27,7 @@ import (
 )
 
 var DiscordToken string
-var AudDToken string
+var AudDClient *audd.Client
 
 // If you want to post callbacks from the AudD API to selected Discord text channels:
 // - uncomment lines 39 and 63
@@ -36,11 +36,11 @@ var AudDToken string
 //    - CHAT_LIST is a string with JSON of radio_ids and comma-separated Discord text channel ids, like
 //        {"1":"705141908...,719623447...,731869898...","2":"731869943..."}
 // - set the SECRET_CALLBACK_TOKEN from above to the secretCallbackToken variable to ensure the callbacks are from a trusted source:
-//var secretCallbackToken = "" // SECRET_CALLBACK_TOKEN
+var secretCallbackToken = "" // SECRET_CALLBACK_TOKEN
 
 func main() {
 	// Get a token from the Telegram bot: https://t.me/auddbot?start=api and copy it to AudDToken
-	AudDToken = ""
+	AudDToken := ""
 
 	// Create an application here: https://discordapp.com/developers/applications
 	// Copy the secret to DiscordToken and get the Client ID
@@ -53,6 +53,8 @@ func main() {
 	// To recognize a song from a voice channel, type !song or !recognize.
 	// It's better to mention users who are playing the song (like !song @SomeRandomMusicBot).
 	// If you want the bot to listen to a channel so it can immediately recognize the song from the last 15 second of audio, type !listen.
+
+	AudDClient = audd.NewClient(AudDToken)
 
 	dg, err := discordgo.New("Bot " + DiscordToken)
 	if capture(err) {
@@ -241,7 +243,7 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 			}
 		}
 	}
-	
+
 }
 
 func guildCreate(s *discordgo.Session, event *discordgo.GuildCreate) {
@@ -503,12 +505,10 @@ func recordSound(s *discordgo.Session, guildID, channelID string, Users []string
 	if err != nil {
 		return audd.RecognitionResult{}, err
 	}
-	result, err := audd.RecognizeByFile(bytes.NewBuffer(audioBuf), AudDToken, map[string]string{"return": "song_link,timecode"})
-	if err != nil {
-		return audd.RecognitionResult{}, err
-	}
-	capture(vc.Disconnect())
-	return result.Result, nil
+	go func() {
+		capture(vc.Disconnect())
+	}()
+	return AudDClient.Recognize(audioBuf, "", nil)
 }
 
 
@@ -518,11 +518,7 @@ func recognizeFromBuffer(buffer serverBuffer, Users []string) (audd.RecognitionR
 	if err != nil {
 		return audd.RecognitionResult{}, err
 	}
-	result, err := audd.RecognizeByFile(bytes.NewBuffer(audioBuf), AudDToken, map[string]string{"return": "song_link,timecode"})
-	if err != nil {
-		return audd.RecognitionResult{}, err
-	}
-	return result.Result, nil
+	return AudDClient.Recognize(audioBuf, "", nil)
 }
 
 var usersSSRCs = map[string]int{}
