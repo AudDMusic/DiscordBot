@@ -1,0 +1,15 @@
+{
+  "AudDToken": "",
+  "DiscordToken": "",
+  "SecretCallbackToken": "",
+  "CallbacksAddr": "127.0.0.1:4541",
+  "Triggers": [
+    "whats the song", "whats this song", "!song", "!recognize", "!audd",
+  ],
+  "AntiTriggers": [
+    "whats the song about"
+  ],
+  "MaxReplyDepth": 3,
+  "MinScore": 65,
+  "SentryDSN": ""
+}
