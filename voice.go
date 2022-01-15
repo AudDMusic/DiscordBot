@@ -12,13 +12,13 @@ import (
 	"time"
 )
 
-func CreateAndStartBuffer(s *discordgo.Session, guildID, channelID string) error {
+func CreateAndStartBuffer(s *discordgo.Session, guildID, channelID, initiatedByUserID string) error {
 	mu.Lock()
 	existedBuf, alreadySet := serverBuffers[guildID+"-"+channelID]
 	if alreadySet {
 		existedBuf.Stop()
 	}
-	buf, err := startBuffer(s, guildID, channelID)
+	buf, err := startBuffer(s, guildID, channelID, initiatedByUserID)
 	if err != nil {
 		mu.Unlock()
 		return err
@@ -27,7 +27,16 @@ func CreateAndStartBuffer(s *discordgo.Session, guildID, channelID string) error
 	mu.Unlock()
 	return nil
 }
-func startBuffer(s *discordgo.Session, guildID, channelID string) (serverBuffer, error) {
+func StopBuffer(guildID, channelID string) {
+	mu.Lock()
+	existedBuf, alreadySet := serverBuffers[guildID+"-"+channelID]
+	if alreadySet {
+		existedBuf.Stop()
+	}
+	delete(serverBuffers, guildID+"-"+channelID)
+	mu.Unlock()
+}
+func startBuffer(s *discordgo.Session, guildID, channelID, initiatedByUserID string) (serverBuffer, error) {
 	vc, err := s.ChannelVoiceJoin(guildID, channelID, true, false, &h)
 	if err != nil {
 		return serverBuffer{}, err
@@ -40,8 +49,9 @@ func startBuffer(s *discordgo.Session, guildID, channelID string) (serverBuffer,
 	}
 
 	audioBuf, started, stop := listenBuffer(recv, time.Second*12, onClose)
-	return serverBuffer{audioBuf, started, stop, ""}, nil
+	return serverBuffer{buf: audioBuf, start: started, stop: stop, InitiatedByUser: initiatedByUserID}, nil
 }
+
 func (c *BotConfig) recordSound(s *discordgo.Session, guildID, channelID string, User string) ([]byte, error) {
 	vc, err := s.ChannelVoiceJoin(guildID, channelID, true, false, &h)
 	if err != nil {
@@ -132,7 +142,7 @@ func getWavAudio(in chan *discordgo.Packet, readAll bool, User string) ([]byte, 
 
 func listenBuffer(in chan *discordgo.Packet, size time.Duration, onClose func()) (chan *discordgo.Packet, chan struct{}, chan struct{}) {
 	started := make(chan struct{}, 2)
-	stop := make(chan struct{}, 2)
+	stop := make(chan struct{}, 4)
 	out := make(chan *discordgo.Packet, 50000)
 	go func() {
 		defer onClose()
@@ -197,6 +207,7 @@ func checkSSRC(ssrc uint32) string {
 }
 
 var usersSSRCs = map[string]int{}
+
 var h = discordgo.VoiceSpeakingUpdateHandler(func(vc *discordgo.VoiceConnection, vs *discordgo.VoiceSpeakingUpdate) {
 	if vs.Speaking {
 		mu.Lock()
