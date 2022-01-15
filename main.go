@@ -48,9 +48,18 @@ var AudDClient *audd.Client
 const enterpriseChunkLength = 12
 
 //ToDo: create a good help message
-var help = "If you see an audio or a video and want to know what's the music, reply to it with the !recognize command.\n" +
-	"Use the recognize !listen while in a voice channel, and I'll join it and listen to what happens. " +
-	"Then, use the !recognize command with a mention of a user and I'll identify the music they're playing"
+var help = "👋 Hi! I'm a music recognition bot. I'm still in testing and might restart from time to time. Please report any bugs if you experience them.\n\n" +
+	"If you see an audio or a video and want to know what's the music, you can reply to it with !song, and the " +
+	"bot will identify the music (the commands are subject to change). Or make a right click on the message and pick Apps " +
+	"-> Recognize This Song.\n\n" +
+	"When you're on a voice channel and someone is playing music there, type \"!song [mention]\"," +
+	" mentioning the user playing the music. The bot will record the sound for 12 seconds and then attempt to " +
+	"identify the song. (The same as slash /song-vc command.)\n\n" +
+	"On a voice channel, you can also use the !listen command, so the bot joins, listens, and keeps the last 12 seconds " +
+	"of audio in it's memory, and when you type !song [mention], it will immediately identify music from the last 12 " +
+	"seconds. (The same as the slash /listen command.) If you send !stop-listening, the bot will leave the VC. (The same as the /stop-listening command.)"
+
+// ToDo: move from PCM to recording OPUS? E.g., using https://github.com/bwmarrin/dca (or https://github.com/jonas747/dca)
 
 func main() {
 	cfg, err := loadConfig(configFile)
@@ -160,10 +169,11 @@ func (c *BotConfig) guildCreate(s *discordgo.Session, event *discordgo.GuildCrea
 }
 
 type serverBuffer struct {
-	buf      chan *discordgo.Packet
-	start    chan struct{}
-	stop     chan struct{}
-	LastUser string
+	buf             chan *discordgo.Packet
+	start           chan struct{}
+	stop            chan struct{}
+	LastUser        string
+	InitiatedByUser string
 }
 
 func (v *serverBuffer) Start() {
@@ -275,8 +285,8 @@ func (c *BotConfig) getMessageFromRecognitionResult(result []audd.RecognitionEnt
 	if reference != nil {
 		response.Reference = reference
 	}
-	footerEmbed := &discordgo.MessageEmbed{Fields: make([]*discordgo.MessageEmbedField, 0)}
 	if len(songs) > 0 {
+		footerEmbed := &discordgo.MessageEmbed{Fields: make([]*discordgo.MessageEmbedField, 0)}
 		footerEmbed.Author = &discordgo.MessageEmbedAuthor{
 			Name:    "Powered by AudD Music Recognition API",
 			IconURL: "https://audd.io/pride_logo_outline_100px.png",
@@ -291,8 +301,8 @@ func (c *BotConfig) getMessageFromRecognitionResult(result []audd.RecognitionEnt
 			footerEmbed.Footer = &discordgo.MessageEmbedFooter{
 				Text: "If the matched percent is less than 100, it could be a false positive result"}
 		}
+		response.Embeds = []*discordgo.MessageEmbed{footerEmbed}
 	}
-	response.Embeds = []*discordgo.MessageEmbed{footerEmbed}
 	response.Components = GetButtons(len(songs) > 0)
 	if len(songs) == 0 {
 		var textResponse string
@@ -383,7 +393,12 @@ var ApplicationCommands = []*discordgo.ApplicationCommand{
 	{
 		Type:        discordgo.ChatApplicationCommand,
 		Name:        "listen",
-		Description: "Joins the voice channel and will immediately identify music from last 12 seconds on /song-vc",
+		Description: "Join the voice channel and wait for /song-vc, then immediately identify music from last 12 seconds",
+	},
+	{
+		Type:        discordgo.ChatApplicationCommand,
+		Name:        "stop-listening",
+		Description: "Leave the voice channel",
 	},
 	{
 		Type: discordgo.MessageApplicationCommand,
@@ -494,6 +509,31 @@ var commandHandlers = map[string]func(c *BotConfig, s *discordgo.Session, i *dis
 			},
 		}))
 	},
+	"stop-listening": func(c *BotConfig, s *discordgo.Session, i *discordgo.InteractionCreate) {
+		if i.Member == nil {
+			return
+		}
+		if i.Member.User == nil {
+			return
+		}
+		left, message := c.StopListeningCommand(s, i.GuildID, i.Member.User.ID)
+		if left {
+			capture(s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+				Type: discordgo.InteractionResponseChannelMessageWithSource,
+				Data: &discordgo.InteractionResponseData{
+					Content: message,
+				},
+			}))
+		} else {
+			capture(s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+				Type: discordgo.InteractionResponseChannelMessageWithSource,
+				Data: &discordgo.InteractionResponseData{
+					Content: message,
+					Flags:   1 << 6,
+				},
+			}))
+		}
+	},
 }
 
 func (c *BotConfig) interactionCreate(s *discordgo.Session, i *discordgo.InteractionCreate) {
@@ -511,6 +551,11 @@ func (c *BotConfig) messageCreate(s *discordgo.Session, m *discordgo.MessageCrea
 	if strings.HasPrefix(m.Content, "!here") {
 		fmt.Println(m.ChannelID, m.GuildID)
 		_, _ = s.ChannelMessageSendReply(m.ChannelID, "Guild ID: "+m.GuildID+", Channel ID: "+m.ChannelID, m.Reference())
+		return
+	}
+	if m.Content == "!help" {
+		_, _ = s.ChannelMessageSendReply(m.ChannelID, help, m.Reference())
+		return
 	}
 	compare := getBodyToCompare(m.Content)
 	trigger := substringInSlice(compare, c.Triggers)
@@ -542,6 +587,10 @@ func (c *BotConfig) messageCreate(s *discordgo.Session, m *discordgo.MessageCrea
 			reply = "Sorry, I can't find a voice channel you're in"
 		}
 		_, _ = s.ChannelMessageSendReply(m.ChannelID, reply, m.Reference()) // ToDo: Add GitHub and Report bug components to all the messages like this one?
+	}
+	if strings.HasPrefix(m.Content, "!stop-listening") {
+		_, reply := c.StopListeningCommand(s, m.GuildID, m.Author.ID)
+		_, _ = s.ChannelMessageSendReply(m.ChannelID, reply, m.Reference())
 	}
 }
 
@@ -613,24 +662,89 @@ func (c *BotConfig) SongVCCommand(s *discordgo.Session,
 	return false, reply
 }
 
-//ToDo: add a stop command so the bot leaves the VC; also, leave the VC if it's empty/the person who added it has left
+//ToDo: leave the VC if it's empty/the person who added it has left
+//ToDo: a setting for changing from 12 seconds to other numbers
+
+type GuildChPair struct {
+	GuildID   string
+	ChannelID string
+}
+
+var UsersInvitedBot = map[string]GuildChPair{}
 
 func (c *BotConfig) ListenCommand(s *discordgo.Session, GuildID, UserID string) string {
 	g, err := s.State.Guild(GuildID)
 	if capture(err) {
 		return ""
 	}
+	mu.Lock()
+	ch, exists := UsersInvitedBot[UserID]
+	delete(UsersInvitedBot, UserID)
+	mu.Unlock()
+	if exists {
+		StopBuffer(ch.GuildID, ch.ChannelID)
+	}
 	for _, vs := range g.VoiceStates {
-		if vs.UserID == UserID {
-			err := CreateAndStartBuffer(s, g.ID, vs.ChannelID)
-			if capture(err) {
-				return ""
-			}
-			return "Listening!\n" +
-				"Type !song or !recognize with a mention to recognize a song played by someone mentioned."
+		if vs.UserID != UserID {
+			continue
 		}
+		err := CreateAndStartBuffer(s, g.ID, vs.ChannelID, UserID)
+		if capture(err) {
+			return ""
+		}
+		mu.Lock()
+		UsersInvitedBot[UserID] = GuildChPair{GuildID: GuildID, ChannelID: vs.ChannelID}
+		mu.Unlock()
+		return "Listening!\n" +
+			"Type !song or !recognize with a mention to recognize a song played by someone mentioned."
 	}
 	return ""
+}
+func (c *BotConfig) StopListeningCommand(s *discordgo.Session, GuildID, UserID string) (left bool, response string) {
+	leavingResponse := "Bye!"
+	mu.Lock()
+	ch, exists := UsersInvitedBot[UserID]
+	delete(UsersInvitedBot, UserID)
+	mu.Unlock()
+	if exists {
+		// Allow kicking the bot by the user who invited it
+		StopBuffer(ch.GuildID, ch.ChannelID)
+		response = leavingResponse
+		left = true
+	}
+	g, err := s.State.Guild(GuildID)
+	if capture(err) {
+		return
+	}
+	UsersByChannels := map[string]string{}
+	for _, vs := range g.VoiceStates {
+		UsersByChannels[vs.UserID] = vs.ChannelID
+	}
+	for _, vs := range g.VoiceStates {
+		if vs.UserID != UserID {
+			continue
+		}
+		mu.Lock()
+		existedBuf, isSet := serverBuffers[g.ID+"-"+vs.ChannelID]
+		mu.Unlock()
+		if isSet {
+			if UsersByChannels[existedBuf.InitiatedByUser] != vs.ChannelID {
+				// Allow kicking the bot by any user on the voice channel if the user who invited it has left
+				StopBuffer(GuildID, vs.ChannelID)
+				left = true
+				response = leavingResponse
+				return
+			}
+		}
+		if response == "" {
+			response = "Sorry, if the person who invited me to listen to the voice channel is still on the voice channel, only " +
+				"they can use this command"
+		}
+		return
+	}
+	response = "You can use this command if you invited me to listen to a voice channel or if you're on a voice channel " +
+		"with me and the person who invited me has left"
+	return
 }
 
 func (c *BotConfig) getBufferBytes(buffer serverBuffer, User string) ([]byte, error) {
@@ -717,13 +831,16 @@ func (c *BotConfig) getResult(results []audd.RecognitionResult, includePlaysOn, 
 		baseMessage.Embeds = make([]*discordgo.MessageEmbed, 0)
 	}
 	resultEmbeds := make([]*discordgo.MessageEmbed, 0)
-	for _, result := range results {
+	for i, result := range results {
 		thumb := result.SongLink + "?thumb"
 		if strings.Contains(result.SongLink, "youtu.be/") {
 			thumb = "https://i3.ytimg.com/vi/" + strings.ReplaceAll(result.SongLink, "https://youtu.be/", "") + "/maxresdefault.jpg"
 		}
 		if result.SongLink == "https://lis.tn/VhpgG" || result.SongLink == "" {
 			result.SongLink = "https://www.youtube.com/results?search_query=" + url.QueryEscape(result.Artist+" - "+result.Title)
+			thumb = ""
+		}
+		if i > 0 {
 			thumb = ""
 		}
 		if strings.Contains(result.Timecode, ":") {
