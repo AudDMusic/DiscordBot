@@ -14,19 +14,21 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 )
 
-const release = "0.0.2"
+const release = "discord-bot@0.0.3"
 
 const configFile = "config.json"
 
 type BotConfig struct {
 	AudDToken            string   `required:"true" default:"test" usage:"the token from dashboard.audd.io" json:"AudDToken"`
 	DiscordToken         string   `required:"true" default:"test" usage:"the secret from https://discordapp.com/developers/applications" json:"DiscordToken"`
+	DiscordAppID         string   `usage:"the application id from https://discordapp.com/developers/applications" json:"DiscordAppID"`
 	Triggers             []string `usage:"phrases bot will react to" json:"Triggers"`
 	AntiTriggers         []string `usage:"phrases bot will avoid replying to" json:"AudDTAntiTriggers"`
 	MaxTriggerTextLength int      `json:"MaxTriggerTextLength"`
@@ -45,7 +47,7 @@ var AudDClient *audd.Client
 
 const enterpriseChunkLength = 12
 
-//ToDo: decide on the commands, create a good help message
+//ToDo: create a good help message
 var help = "If you see an audio or a video and want to know what's the music, reply to it with the !recognize command.\n" +
 	"Use the recognize !listen while in a voice channel, and I'll join it and listen to what happens. " +
 	"Then, use the !recognize command with a mention of a user and I'll identify the music they're playing"
@@ -60,9 +62,18 @@ func main() {
 		Dsn: cfg.SentryDSN,
 		// Enable printing of SDK debug messages.
 		// Useful when getting started or trying to figure something out.
-		Debug:   false,
-		Release: release,
+		Debug:            false,
+		Release:          release,
+		AttachStacktrace: true,
 	})
+	defer func() {
+		err := recover()
+
+		if err != nil {
+			sentry.CurrentHub().Recover(err)
+			sentry.Flush(time.Second * 5)
+		}
+	}()
 	AudDClient = audd.NewClient(cfg.AudDToken)
 	AudDClient.SetEndpoint(audd.EnterpriseAPIEndpoint)
 	if err != nil {
@@ -82,6 +93,7 @@ func main() {
 			dg.AddHandler(cfg.resumed)
 			dg.AddHandler(cfg.messageCreate)
 			dg.AddHandler(cfg.guildCreate)
+			dg.AddHandler(cfg.interactionCreate)
 		}()
 		dSession = dg
 		dSessionMu.Unlock() // Unlocks the outside lock so the callback server can start
@@ -112,8 +124,12 @@ func (c *BotConfig) HandleCallback(_ http.ResponseWriter, r *http.Request) {
 	}
 	includePlaysOn := r.URL.Query().Get("includePlaysOn") == "true"
 	publishAnnouncement := r.URL.Query().Get("publishAnnouncement") == "true"
-	c.sendResult(r.URL.Query().Get("chat_id"), []audd.RecognitionResult{result}, includePlaysOn,
-		publishAnnouncement, false, nil)
+	message := c.getResult([]audd.RecognitionResult{result}, includePlaysOn,
+		publishAnnouncement, nil)
+	if message == nil {
+		return
+	}
+	c.sendResult(r.URL.Query().Get("chat_id"), message, false)
 }
 
 func (c *BotConfig) guildCreate(s *discordgo.Session, event *discordgo.GuildCreate) {
@@ -202,19 +218,20 @@ func GetButtons(includeDonate bool) []discordgo.MessageComponent {
 	return []discordgo.MessageComponent{buttonsRow}
 }
 
-func (c *BotConfig) HandleQuery(s *discordgo.Session, m *discordgo.Message) bool {
+func (c *BotConfig) HandleQuery(s *discordgo.Session, m *discordgo.Message) (bool, *discordgo.MessageSend) {
 	resultUrl, err := c.GetLinkFromMessage(s, m)
 	if capture(err) {
-		_, _ = s.ChannelMessageSendReply(m.ChannelID, "Sorry, I got an error from Discord when I tried to "+
-			"get the referenced message", m.Reference())
-		return false
+		return false, &discordgo.MessageSend{
+			Content:   "Sorry, I got an error from Discord when I tried to get the referenced message",
+			Reference: m.Reference(),
+		}
 	}
 	if resultUrl == "" {
-		return false
+		return false, nil
 	}
 	if strings.Contains(resultUrl, "https://lis.tn/") {
 		fmt.Println("Skipping a reply to our comment")
-		return false
+		return false, nil
 	}
 	timestampTo := 0
 	timestamp := GetSkipFirstFromLink(resultUrl)
@@ -243,20 +260,20 @@ func (c *BotConfig) HandleQuery(s *discordgo.Session, m *discordgo.Message) bool
 		at = "the end"
 	}
 
-	c.sendRecognitionResult(s, m, result, err,
+	message := c.getMessageFromRecognitionResult(result, err,
 		fmt.Sprintf("Sorry, I couldn't get any audio from %s", resultUrl),
 		fmt.Sprintf("Sorry, I couldn't recognize the song."+
 			"\n\nI tried to identify music from %s at %s.",
-			resultUrl, at))
-	return true
+			resultUrl, at), m.Reference())
+	return true, message
 }
 
-func (c *BotConfig) sendRecognitionResult(s *discordgo.Session, m *discordgo.Message,
-	result []audd.RecognitionEnterpriseResult, err error, responseNoAudio, responseNoResult string) {
+func (c *BotConfig) getMessageFromRecognitionResult(result []audd.RecognitionEnterpriseResult, err error,
+	responseNoAudio, responseNoResult string, reference *discordgo.MessageReference) *discordgo.MessageSend {
 	songs, highestScore := GetSongs(result, c.MinScore)
-	response := &discordgo.MessageSend{
-		//Content:   "<@" + m.Author.ID + "> ",
-		Reference: m.Reference(),
+	response := &discordgo.MessageSend{}
+	if reference != nil {
+		response.Reference = reference
 	}
 	footerEmbed := &discordgo.MessageEmbed{Fields: make([]*discordgo.MessageEmbedField, 0)}
 	if len(songs) > 0 {
@@ -293,18 +310,16 @@ func (c *BotConfig) sendRecognitionResult(s *discordgo.Session, m *discordgo.Mes
 			textResponse = responseNoResult
 		}
 		response.Content += textResponse
-		_, err = s.ChannelMessageSendComplex(m.ChannelID, response)
-		if capture(err) {
-			fmt.Println("error during sending to", m.ChannelID)
-		}
-		return
+		return response
 	}
 	if len(songs) > 0 {
 		if len(songs) > 1 {
 			response.Content += "I got matches with these songs:"
 		}
-		c.sendResult(m.ChannelID, songs, true, false, true, response)
+		message := c.getResult(songs, true, true, response)
+		return message
 	}
+	return nil
 }
 
 func GetSongs(result []audd.RecognitionEnterpriseResult, minScore int) ([]audd.RecognitionResult, int) {
@@ -351,6 +366,144 @@ func GetSongs(result []audd.RecognitionEnterpriseResult, minScore int) ([]audd.R
 	}
 	return songs, highestScore
 }
+
+var ApplicationCommands = []*discordgo.ApplicationCommand{
+	{
+		Type:        discordgo.ChatApplicationCommand,
+		Name:        "song-vc",
+		Description: "Recognize a song playing on the voice channel you're on",
+		Version:     "",
+		Options: []*discordgo.ApplicationCommandOption{{
+			Type:        discordgo.ApplicationCommandOptionUser,
+			Name:        "speaker",
+			Description: "User playing the music on the voice channel",
+			Required:    true,
+		}},
+	},
+	{
+		Type:        discordgo.ChatApplicationCommand,
+		Name:        "listen",
+		Description: "Joins the voice channel and will immediately identify music from last 12 seconds on /song-vc",
+	},
+	{
+		Type: discordgo.MessageApplicationCommand,
+		Name: "Recognize This Song",
+	},
+}
+
+var commandHandlers = map[string]func(c *BotConfig, s *discordgo.Session, i *discordgo.InteractionCreate){
+	"Recognize This Song": func(c *BotConfig, s *discordgo.Session, i *discordgo.InteractionCreate) {
+		data := i.ApplicationCommandData()
+		if data.Resolved == nil {
+			return
+		}
+		if data.Resolved.Messages == nil {
+			return
+		}
+		var m *discordgo.Message
+		for _, m_ := range data.Resolved.Messages {
+			m = m_
+		}
+		if m == nil {
+			return
+		}
+		reacted, message := c.HandleQuery(s, m)
+		if !reacted {
+			capture(s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+				Type: discordgo.InteractionResponseChannelMessageWithSource,
+				Data: &discordgo.InteractionResponseData{
+					Content: "Sorry, I couldn't get any audio from this message",
+				},
+			}))
+			return
+		}
+		capture(s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+			Type: discordgo.InteractionResponseChannelMessageWithSource,
+			Data: &discordgo.InteractionResponseData{
+				Content:         message.Content,
+				Components:      message.Components,
+				Embeds:          message.Embeds,
+				Files:           message.Files,
+				TTS:             message.TTS,
+				AllowedMentions: message.AllowedMentions,
+			},
+		}))
+	},
+	"song-vc": func(c *BotConfig, s *discordgo.Session, i *discordgo.InteractionCreate) {
+		data := i.ApplicationCommandData()
+		if i.Member == nil {
+			b, _ := json.Marshal(i)
+			fmt.Println(string(b))
+			b, _ = json.Marshal(data)
+			fmt.Println(string(b))
+			return
+		}
+		if i.Member.User == nil {
+			b, _ := json.Marshal(i)
+			fmt.Println(string(b))
+			b, _ = json.Marshal(data)
+			fmt.Println(string(b))
+			return
+		}
+		var UserToListenTo string
+		if data.Options != nil {
+			if len(data.Options) > 0 {
+				if data.Options[0].Type == discordgo.ApplicationCommandOptionUser {
+					UserToListenTo = data.Options[0].Value.(string)
+				}
+			}
+		}
+		capture(s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+			Type: discordgo.InteractionResponseChannelMessageWithSource,
+			Data: &discordgo.InteractionResponseData{
+				Content: "Collecting 12 seconds of audio...",
+			},
+		}))
+		_, message := c.SongVCCommand(s, i.Member.User.ID, UserToListenTo, i.GuildID, nil)
+		if message == nil {
+			message = &discordgo.MessageSend{
+				Content: "Sorry, I experienced an unexpected error",
+			}
+		}
+		_, err := s.FollowupMessageCreate(c.DiscordAppID, i.Interaction, true, &discordgo.WebhookParams{
+			Content:         message.Content,
+			Components:      message.Components,
+			Embeds:          message.Embeds,
+			Files:           message.Files,
+			TTS:             message.TTS,
+			AllowedMentions: message.AllowedMentions,
+			// Flags:           1 << 6,
+		})
+		capture(err)
+	},
+	"listen": func(c *BotConfig, s *discordgo.Session, i *discordgo.InteractionCreate) {
+		if i.Member == nil {
+			return
+		}
+		if i.Member.User == nil {
+			return
+		}
+		message := c.ListenCommand(s, i.GuildID, i.Member.User.ID)
+		if message == "" {
+			message = "Sorry, I can't find a voice channel you're in"
+		}
+		capture(s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+			Type: discordgo.InteractionResponseChannelMessageWithSource,
+			Data: &discordgo.InteractionResponseData{
+				Content: message,
+			},
+		}))
+	},
+}
+
+func (c *BotConfig) interactionCreate(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	if h, ok := commandHandlers[i.ApplicationCommandData().Name]; ok {
+		h(c, s, i)
+	} else {
+		fmt.Println("Unknown command:", i.ApplicationCommandData().Name)
+	}
+}
+
 func (c *BotConfig) messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 	if m.Author.ID == s.State.User.ID {
 		return
@@ -362,93 +515,122 @@ func (c *BotConfig) messageCreate(s *discordgo.Session, m *discordgo.MessageCrea
 	compare := getBodyToCompare(m.Content)
 	trigger := substringInSlice(compare, c.Triggers)
 	if trigger {
-		reactedToUrl := c.HandleQuery(s, m.Message) // Try to find a video or an audio and react to it
+		reactedToUrl, message := c.HandleQuery(s, m.Message) // Try to find a video or an audio and react to it
 		if reactedToUrl {
+			if message != nil {
+				c.sendResult(m.ChannelID, message, false)
+			}
 			return
 		}
 		var UserToListenTo string
 		if len(m.Mentions) > 0 {
 			UserToListenTo = m.Mentions[0].ID
-		} else {
-			_, _ = s.ChannelMessageSendReply(m.ChannelID,
-				"Please mention the user playing the music in a voice channel (like !song @musicbot) or "+
-					"reply to a message with an audio file or a link to the audio file", m.Reference())
-			return
 		}
 		channel, err := s.State.Channel(m.ChannelID)
 		if capture(err) {
 			return
 		}
-		g, err := s.State.Guild(channel.GuildID)
-		if capture(err) {
-			return
+		_, message = c.SongVCCommand(s, m.Author.ID, UserToListenTo, channel.GuildID, m.Reference())
+		if message != nil {
+			c.sendResult(m.ChannelID, message, false)
 		}
-		for _, vs := range g.VoiceStates {
-			if vs.UserID != m.Author.ID {
-				continue
-			}
-			if UserToListenTo == "" {
-				mu.Lock()
-				UserToListenTo = serverBuffers[g.ID+"-"+vs.ChannelID].LastUser
-				mu.Unlock()
-			}
-			if UserToListenTo == "" {
-				return
-			}
-			mu.Lock()
-			existedBuf, alreadySet := serverBuffers[g.ID+"-"+vs.ChannelID]
-			existedBuf.LastUser = UserToListenTo
-			serverBuffers[g.ID+"-"+vs.ChannelID] = existedBuf
-			mu.Unlock()
-			var audioBuf []byte
-
-			if alreadySet {
-				_, _ = s.ChannelMessageSendReply(m.ChannelID, "I'll identify the song in the 12 seconds of audio",
-					m.Reference())
-				audioBuf, err = c.getBufferBytes(existedBuf, UserToListenTo)
-			} else {
-				_, _ = s.ChannelMessageSendReply(m.ChannelID, "I'm listening to the audio for 12 seconds and "+
-					"will identify the song after that",
-					m.Reference())
-				audioBuf, err = c.recordSound(s, g.ID, vs.ChannelID, UserToListenTo)
-				mu.Lock()
-				delete(serverBuffers, g.ID+"-"+vs.ChannelID)
-				mu.Unlock()
-			}
-			result, err := AudDClient.RecognizeLongAudio(audioBuf,
-				map[string]string{"accurate_offsets": "true", "limit": "1"})
-			c.sendRecognitionResult(s, m.Message, result, err,
-				"Sorry, I couldn't record the audio",
-				"Sorry, I couldn't recognize the song.")
-			return
-		}
-		_, _ = s.ChannelMessageSendReply(m.ChannelID, "You need to be in a voice channel and mention a user "+
-			"playing music there or you need to reply to an audio file or URL to identify music from", m.Reference())
 		return
 	}
 	if strings.HasPrefix(m.Content, "!listen") {
-		c, err := s.State.Channel(m.ChannelID)
-		if capture(err) {
-			return
+		reply := c.ListenCommand(s, m.GuildID, m.Author.ID)
+		if reply == "" {
+			reply = "Sorry, I can't find a voice channel you're in"
 		}
-		g, err := s.State.Guild(c.GuildID)
-		if capture(err) {
-			return
+		_, _ = s.ChannelMessageSendReply(m.ChannelID, reply, m.Reference()) // ToDo: Add GitHub and Report bug components to all the messages like this one?
+	}
+}
+
+func (c *BotConfig) SongVCCommand(s *discordgo.Session,
+	UserID, UserToListenTo, GuildID string, reference *discordgo.MessageReference) (bool, *discordgo.MessageSend) {
+	g, err := s.State.Guild(GuildID)
+	if capture(err) {
+		return false, nil
+	}
+	for _, vs := range g.VoiceStates {
+		if vs.UserID != UserID {
+			continue
 		}
-		for _, vs := range g.VoiceStates {
-			if vs.UserID == m.Author.ID {
-				err := CreateAndStartBuffer(s, g.ID, vs.ChannelID)
-				if capture(err) {
-					return
-				}
-				_, _ = s.ChannelMessageSendReply(m.ChannelID, "Listening!\n"+
-					"Type !song or !recognize with a mention to recognize a song played by someone mentioned.",
-					m.Reference())
-				return
+		if UserToListenTo == "" {
+			mu.Lock()
+			UserToListenTo = serverBuffers[g.ID+"-"+vs.ChannelID].LastUser
+			mu.Unlock()
+		}
+		if UserToListenTo == "" {
+			reply := &discordgo.MessageSend{
+				Content: "Please mention the user playing the music in a voice channel (like !song @musicbot) or " +
+					"reply to a message with an audio file or a link to the audio file",
 			}
+			if reference != nil {
+				reply.Reference = reference
+			}
+			return false, reply
+		}
+		mu.Lock()
+		existedBuf, alreadySet := serverBuffers[g.ID+"-"+vs.ChannelID]
+		existedBuf.LastUser = UserToListenTo
+		serverBuffers[g.ID+"-"+vs.ChannelID] = existedBuf
+		mu.Unlock()
+		var audioBuf []byte
+
+		if reference != nil {
+			go s.MessageReactionAdd(reference.ChannelID, reference.MessageID, "🎧")
+		}
+		if alreadySet {
+			/*_, _ = s.ChannelMessageSendReply(m.ChannelID, "I'll identify the song in the 12 seconds of audio",
+			m.Reference())*/
+			audioBuf, err = c.getBufferBytes(existedBuf, UserToListenTo)
+		} else {
+			/*_, _ = s.ChannelMessageSendReply(m.ChannelID, "I'm listening to the audio for 12 seconds and "+
+			"will identify the song after that",
+			m.Reference())*/
+			audioBuf, err = c.recordSound(s, g.ID, vs.ChannelID, UserToListenTo)
+			mu.Lock()
+			delete(serverBuffers, g.ID+"-"+vs.ChannelID)
+			mu.Unlock()
+		}
+		result, err := AudDClient.RecognizeLongAudio(audioBuf,
+			map[string]string{"accurate_offsets": "true", "limit": "1"})
+		message := c.getMessageFromRecognitionResult(result, err,
+			"Sorry, I couldn't record the audio",
+			"Sorry, I couldn't recognize the song.", reference)
+		if reference != nil {
+			go s.MessageReactionRemove(reference.ChannelID, reference.MessageID, "🎧", "@me")
+		}
+		return true, message
+	}
+	reply := &discordgo.MessageSend{
+		Content: "You need to be in a voice channel and mention a user " +
+			"playing music there or you need to reply to an audio file or URL to identify music from",
+	}
+	if reference != nil {
+		reply.Reference = reference
+	}
+	return false, reply
+}
+
+//ToDo: add a stop command so the bot leaves the VC; also, leave the VC if it's empty/the person who added it has left
+
+func (c *BotConfig) ListenCommand(s *discordgo.Session, GuildID, UserID string) string {
+	g, err := s.State.Guild(GuildID)
+	if capture(err) {
+		return ""
+	}
+	for _, vs := range g.VoiceStates {
+		if vs.UserID == UserID {
+			err := CreateAndStartBuffer(s, g.ID, vs.ChannelID)
+			if capture(err) {
+				return ""
+			}
+			return "Listening!\n" +
+				"Type !song or !recognize with a mention to recognize a song played by someone mentioned."
 		}
 	}
-
+	return ""
 }
 
 func (c *BotConfig) getBufferBytes(buffer serverBuffer, User string) ([]byte, error) {
@@ -488,6 +670,34 @@ func (c *BotConfig) ready(s *discordgo.Session, _ *discordgo.Ready) {
 	dSession = s
 	dSessionMu.Unlock()
 	capture(s.UpdateListeningStatus("!song"))
+
+	names := make(map[string]int)
+	for i, wantedCmd := range ApplicationCommands {
+		names[wantedCmd.Name] = i
+	}
+	cmds, _ := s.ApplicationCommands(c.DiscordAppID, "")
+	for _, oldCmd := range cmds {
+		if i, stillWant := names[oldCmd.Name]; stillWant {
+			delete(names, oldCmd.Name)
+			wantedCmd := ApplicationCommands[i]
+			if oldCmd.Description != wantedCmd.Description { // ToDo: full comparison instead of just descriptions?
+				updatedCmd, err := s.ApplicationCommandEdit(c.DiscordAppID, "", oldCmd.ID, wantedCmd)
+				capture(err)
+				b, _ := json.Marshal(updatedCmd)
+				fmt.Println("Updated cmd:", string(b))
+			}
+		} else {
+			capture(s.ApplicationCommandDelete(c.DiscordAppID, "", oldCmd.ID))
+			fmt.Println("Deleted cmd:", oldCmd.Name)
+		}
+		// fmt.Println(oldCmd.ID, oldCmd.Name, oldCmd)
+	}
+	for _, i := range names {
+		createdCmd, err := s.ApplicationCommandCreate(c.DiscordAppID, "", ApplicationCommands[i])
+		capture(err)
+		b, _ := json.Marshal(createdCmd)
+		fmt.Println("Added cmd:", string(b))
+	}
 }
 
 func (c *BotConfig) resumed(s *discordgo.Session, _ *discordgo.Resumed) {
@@ -497,28 +707,8 @@ func (c *BotConfig) resumed(s *discordgo.Session, _ *discordgo.Resumed) {
 	capture(s.UpdateListeningStatus("!song"))
 }
 
-func (c *BotConfig) sendResult(channelID string, results []audd.RecognitionResult, includePlaysOn,
-	publishAnnouncement bool, includeScore bool, baseMessage *discordgo.MessageSend) {
-	dSessionMu.Lock()
-	s := dSession
-	dSessionMu.Unlock()
-	if s == nil {
-		dSessionMu.Lock()
-		err := dg.Open()
-		if capture(err) {
-			if err != discordgo.ErrWSAlreadyOpen {
-				fmt.Println("Error opening Discord session:", err)
-				dSessionMu.Unlock()
-				return
-			}
-			s = dg
-			dSession = dg
-		}
-		dSessionMu.Unlock()
-	}
-	if s == nil {
-		return
-	}
+func (c *BotConfig) getResult(results []audd.RecognitionResult, includePlaysOn, includeScore bool,
+	baseMessage *discordgo.MessageSend) *discordgo.MessageSend {
 
 	if baseMessage == nil {
 		baseMessage = &discordgo.MessageSend{}
@@ -604,9 +794,33 @@ func (c *BotConfig) sendResult(channelID string, results []audd.RecognitionResul
 	}
 	resultEmbeds = append(resultEmbeds, baseMessage.Embeds...)
 	baseMessage.Embeds = resultEmbeds
-	m, err := s.ChannelMessageSendComplex(channelID, baseMessage)
+	return baseMessage
+}
+
+func (c *BotConfig) sendResult(channelID string, message *discordgo.MessageSend, publishAnnouncement bool) {
+	dSessionMu.Lock()
+	s := dSession
+	dSessionMu.Unlock()
+	if s == nil {
+		dSessionMu.Lock()
+		err := dg.Open()
+		if capture(err) {
+			if err != discordgo.ErrWSAlreadyOpen {
+				fmt.Println("Error opening Discord session:", err)
+				dSessionMu.Unlock()
+				return
+			}
+			s = dg
+			dSession = dg
+		}
+		dSessionMu.Unlock()
+	}
+	if s == nil {
+		return
+	}
+	m, err := s.ChannelMessageSendComplex(channelID, message)
 	if capture(err) {
-		b, _ := json.Marshal(baseMessage)
+		b, _ := json.Marshal(message)
 		fmt.Println("error during sending to", channelID)
 		fmt.Println(string(b))
 		return
@@ -620,9 +834,14 @@ func (c *BotConfig) sendResult(channelID string, results []audd.RecognitionResul
 	}
 }
 
+//ToDo: fix error capturing
 func capture(err error) bool {
 	if err == nil {
 		return false
+	}
+	_, file, no, ok := runtime.Caller(1)
+	if ok {
+		err = fmt.Errorf("%v from %s#%d", err, file, no)
 	}
 	go sentry.CaptureException(err)
 	go fmt.Println(err.Error())
