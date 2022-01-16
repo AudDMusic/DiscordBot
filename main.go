@@ -750,8 +750,10 @@ func (c *BotConfig) StopListeningCommand(s *discordgo.Session, GuildID, UserID s
 		}
 		return
 	}
-	response = "You can use this command if you invited me to listen to a voice channel or if you're on a voice channel " +
-		"with me and the person who invited me has left"
+	if response == "" {
+		response = "You can use this command if you invited me to listen to a voice channel or if you're on a voice channel " +
+			"with me and the person who invited me has left"
+	}
 	return
 }
 
