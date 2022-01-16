@@ -17,6 +17,7 @@ func CreateAndStartBuffer(s *discordgo.Session, guildID, channelID, initiatedByU
 	existedBuf, alreadySet := serverBuffers[guildID+"-"+channelID]
 	if alreadySet {
 		existedBuf.Stop()
+		delete(serverBuffers, guildID+"-"+channelID)
 	}
 	buf, err := startBuffer(s, guildID, channelID, initiatedByUserID)
 	if err != nil {
@@ -145,18 +146,32 @@ func listenBuffer(in chan *discordgo.Packet, size time.Duration, onClose func())
 	stop := make(chan struct{}, 4)
 	out := make(chan *discordgo.Packet, 50000)
 	go func() {
+		// Added this so if there's no sound, the bot leaves the VC immediately without waiting for a packet
+		<-stop
+		in <- &discordgo.Packet{
+			Type: []byte("stream-stop"),
+		}
+		// If there are a lot of packets in the queue,
+		// this guarantees that the bot will leave after it's done with the current packet
+		stop <- struct{}{}
+	}()
+	go func() {
 		defer onClose()
 		buffered := false
 		var ticker *time.Ticker
 		isStarted := false
 		for f := range in {
 			select {
-			case <-started:
-				isStarted = true
 			case <-stop:
 				close(out)
 				return
+			case <-started:
+				isStarted = true
 			default:
+			}
+			if bytes.Equal(f.Type, []byte("stream-stop")) {
+				close(out)
+				return
 			}
 			if ticker == nil {
 				ticker = time.NewTicker(size)
