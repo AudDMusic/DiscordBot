@@ -148,11 +148,11 @@ func stringInSlice(slice []string, s string) bool {
 	return false
 }
 
-func substringInSlice(s string, slice []string) bool {
+func substringInSlice(s string, slice []string) (bool, string) {
 	for i := range slice {
 		if strings.Contains(s, slice[i]) {
-			return true
+			return true, slice[i]
 		}
 	}
-	return false
+	return false, ""
 }
