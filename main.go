@@ -26,18 +26,21 @@ const release = "discord-bot@0.0.3"
 const configFile = "config.json"
 
 type BotConfig struct {
-	AudDToken            string   `required:"true" default:"test" usage:"the token from dashboard.audd.io" json:"AudDToken"`
-	DiscordToken         string   `required:"true" default:"test" usage:"the secret from https://discordapp.com/developers/applications" json:"DiscordToken"`
-	DiscordAppID         string   `usage:"the application id from https://discordapp.com/developers/applications" json:"DiscordAppID"`
-	Triggers             []string `usage:"phrases bot will react to" json:"Triggers"`
-	AntiTriggers         []string `usage:"phrases bot will avoid replying to" json:"AudDTAntiTriggers"`
-	MaxTriggerTextLength int      `json:"MaxTriggerTextLength"`
-	PatreonSupporters    []string `json:"patreon_supporters"`
-	SecretCallbackToken  string   `json:"SecretCallbackToken"`
-	CallbacksAddr        string   `json:"CallbacksAddr"`
-	MaxReplyDepth        int      `json:"MaxReplyDepth"`
-	MinScore             int      `json:"MinScore"`
-	SentryDSN            string   `default:"" usage:"add a Sentry DSN to capture errors" json:"SentryDSN"`
+	AudDToken               string   `required:"true" default:"test" usage:"the token from dashboard.audd.io" json:"AudDToken"`
+	DiscordToken            string   `required:"true" default:"test" usage:"the secret from https://discordapp.com/developers/applications" json:"DiscordToken"`
+	DiscordAppID            string   `usage:"the application id from https://discordapp.com/developers/applications" json:"DiscordAppID"`
+	Triggers                []string `usage:"phrases bot will react to" json:"Triggers"`
+	AntiTriggers            []string `usage:"phrases bot will avoid replying to" json:"AudDTAntiTriggers"`
+	MaxTriggerTextLength    int      `json:"MaxTriggerTextLength"`
+	PatreonSupporters       []string `json:"patreon_supporters"`
+	SecretCallbackToken     string   `json:"SecretCallbackToken"`
+	CallbacksAddr           string   `json:"CallbacksAddr"`
+	MaxReplyDepth           int      `json:"MaxReplyDepth"`
+	MinScore                int      `json:"MinScore"`
+	UncompressedLimit       int      `usage:"the maximum amount of songs to post as large embeds" json:"UncompressedLimit"`
+	CompressStartingWith    int      `usage:"the first result to compress when compressing" json:"CompressStartingWith"`
+	CanCompressWithoutSlash bool     `usage:"whether can send compressed messages in responses not to usual text" json:"CanCompressWithoutSlash"`
+	SentryDSN               string   `default:"" usage:"add a Sentry DSN to capture errors" json:"SentryDSN"`
 }
 
 var dSession *discordgo.Session
@@ -134,7 +137,7 @@ func (c *BotConfig) HandleCallback(_ http.ResponseWriter, r *http.Request) {
 	includePlaysOn := r.URL.Query().Get("includePlaysOn") == "true"
 	publishAnnouncement := r.URL.Query().Get("publishAnnouncement") == "true"
 	message := c.getResult([]audd.RecognitionResult{result}, includePlaysOn,
-		publishAnnouncement, nil)
+		publishAnnouncement, nil, c.CanCompressWithoutSlash)
 	if message == nil {
 		return
 	}
@@ -228,7 +231,7 @@ func GetButtons(includeDonate bool) []discordgo.MessageComponent {
 	return []discordgo.MessageComponent{buttonsRow}
 }
 
-func (c *BotConfig) HandleQuery(s *discordgo.Session, m *discordgo.Message) (bool, *discordgo.MessageSend) {
+func (c *BotConfig) HandleQuery(s *discordgo.Session, m *discordgo.Message, canCompress bool) (bool, *discordgo.MessageSend) {
 	resultUrl, err := c.GetLinkFromMessage(s, m)
 	if capture(err) {
 		return false, &discordgo.MessageSend{
@@ -261,6 +264,7 @@ func (c *BotConfig) HandleQuery(s *discordgo.Session, m *discordgo.Message) (boo
 	if timestamp == 0 && strings.Contains(m.Content, "at the end") {
 		atTheEnd = "true"
 	}
+	fmt.Println("Recognizing from", resultUrl)
 	result, err := AudDClient.RecognizeLongAudio(resultUrl,
 		map[string]string{"accurate_offsets": "true", "limit": strconv.Itoa(limit),
 			"skip_first_seconds": strconv.Itoa(timestamp), "reversed_order": atTheEnd})
@@ -274,12 +278,12 @@ func (c *BotConfig) HandleQuery(s *discordgo.Session, m *discordgo.Message) (boo
 		fmt.Sprintf("Sorry, I couldn't get any audio from %s", resultUrl),
 		fmt.Sprintf("Sorry, I couldn't recognize the song."+
 			"\n\nI tried to identify music from %s at %s.",
-			resultUrl, at), m.Reference())
+			resultUrl, at), m.Reference(), canCompress)
 	return true, message
 }
 
 func (c *BotConfig) getMessageFromRecognitionResult(result []audd.RecognitionEnterpriseResult, err error,
-	responseNoAudio, responseNoResult string, reference *discordgo.MessageReference) *discordgo.MessageSend {
+	responseNoAudio, responseNoResult string, reference *discordgo.MessageReference, canCompress bool) *discordgo.MessageSend {
 	songs, highestScore := GetSongs(result, c.MinScore)
 	response := &discordgo.MessageSend{}
 	if reference != nil {
@@ -323,10 +327,7 @@ func (c *BotConfig) getMessageFromRecognitionResult(result []audd.RecognitionEnt
 		return response
 	}
 	if len(songs) > 0 {
-		if len(songs) > 1 {
-			response.Content += "I got matches with these songs:"
-		}
-		message := c.getResult(songs, true, true, response)
+		message := c.getResult(songs, true, true, response, canCompress)
 		return message
 	}
 	return nil
@@ -422,7 +423,7 @@ var commandHandlers = map[string]func(c *BotConfig, s *discordgo.Session, i *dis
 		if m == nil {
 			return
 		}
-		reacted, message := c.HandleQuery(s, m)
+		reacted, message := c.HandleQuery(s, m, true)
 		if !reacted {
 			capture(s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 				Type: discordgo.InteractionResponseChannelMessageWithSource,
@@ -474,7 +475,7 @@ var commandHandlers = map[string]func(c *BotConfig, s *discordgo.Session, i *dis
 				Content: "Collecting 12 seconds of audio...",
 			},
 		}))
-		_, message := c.SongVCCommand(s, i.Member.User.ID, UserToListenTo, i.GuildID, nil)
+		_, message := c.SongVCCommand(s, i.Member.User.ID, UserToListenTo, i.GuildID, nil, true)
 		if message == nil {
 			message = &discordgo.MessageSend{
 				Content: "Sorry, I experienced an unexpected error",
@@ -550,7 +551,7 @@ func (c *BotConfig) messageCreate(s *discordgo.Session, m *discordgo.MessageCrea
 	}
 	if strings.HasPrefix(m.Content, "!here") {
 		fmt.Println(m.ChannelID, m.GuildID)
-		_, _ = s.ChannelMessageSendReply(m.ChannelID, "Guild ID: "+m.GuildID+", Channel ID: "+m.ChannelID, m.Reference())
+		_, _ = s.ChannelMessageSendReply(m.ChannelID, "[test](https://example.com) Guild ID: "+m.GuildID+", Channel ID: "+m.ChannelID, m.Reference())
 		return
 	}
 	if m.Content == "!help" {
@@ -560,7 +561,7 @@ func (c *BotConfig) messageCreate(s *discordgo.Session, m *discordgo.MessageCrea
 	compare := getBodyToCompare(m.Content)
 	triggered, trigger := substringInSlice(compare, c.Triggers)
 	if triggered {
-		reactedToUrl, message := c.HandleQuery(s, m.Message) // Try to find a video or an audio and react to it
+		reactedToUrl, message := c.HandleQuery(s, m.Message, c.CanCompressWithoutSlash) // Try to find a video or an audio and react to it
 		if reactedToUrl {
 			if message != nil {
 				c.sendResult(m.ChannelID, message, false)
@@ -575,7 +576,7 @@ func (c *BotConfig) messageCreate(s *discordgo.Session, m *discordgo.MessageCrea
 		if capture(err) {
 			return
 		}
-		replyInAnyCase, message := c.SongVCCommand(s, m.Author.ID, UserToListenTo, channel.GuildID, m.Reference())
+		replyInAnyCase, message := c.SongVCCommand(s, m.Author.ID, UserToListenTo, channel.GuildID, m.Reference(), c.CanCompressWithoutSlash)
 		if !replyInAnyCase {
 			if strings.Count(compare, " ") > strings.Count(trigger, " ")+2 {
 				return
@@ -600,7 +601,7 @@ func (c *BotConfig) messageCreate(s *discordgo.Session, m *discordgo.MessageCrea
 }
 
 func (c *BotConfig) SongVCCommand(s *discordgo.Session,
-	UserID, UserToListenTo, GuildID string, reference *discordgo.MessageReference) (bool, *discordgo.MessageSend) {
+	UserID, UserToListenTo, GuildID string, reference *discordgo.MessageReference, canCompress bool) (bool, *discordgo.MessageSend) {
 	g, err := s.State.Guild(GuildID)
 	if capture(err) {
 		return false, nil
@@ -647,11 +648,12 @@ func (c *BotConfig) SongVCCommand(s *discordgo.Session,
 			delete(serverBuffers, g.ID+"-"+vs.ChannelID)
 			mu.Unlock()
 		}
+		fmt.Println("Recognizing from a buffer")
 		result, err := AudDClient.RecognizeLongAudio(audioBuf,
 			map[string]string{"accurate_offsets": "true", "limit": "1"})
 		message := c.getMessageFromRecognitionResult(result, err,
 			"Sorry, I couldn't record the audio",
-			"Sorry, I couldn't recognize the song.", reference)
+			"Sorry, I couldn't recognize the song.", reference, canCompress)
 		if reference != nil {
 			go s.MessageReactionRemove(reference.ChannelID, reference.MessageID, "🎧", "@me")
 		}
@@ -831,34 +833,97 @@ func (c *BotConfig) resumed(s *discordgo.Session, _ *discordgo.Resumed) {
 	capture(s.UpdateListeningStatus("!song"))
 }
 
+func getReleaseInfoString(song *audd.RecognitionResult) string {
+	album := ""
+	label := ""
+	releaseDate := ""
+	if song.Title != song.Album && song.Album != "" {
+		album = "Album: `" + song.Album + "`. "
+	}
+	if song.Artist != song.Label && song.Label != "Self-released" && song.Label != "" {
+		label = " by `" + song.Label + "`"
+	}
+	if song.ReleaseDate != "" {
+		releaseDate = "Released on `" + song.ReleaseDate + "`"
+	} else {
+		if label != "" {
+			label = "Label: " + song.Label
+		}
+	}
+	return fmt.Sprintf("%s%s%s",
+		album, releaseDate, label)
+}
+
+func addTimecodeToLink(song *audd.RecognitionResult) {
+	if strings.Contains(song.Timecode, ":") {
+		ms := strings.Split(song.Timecode, ":")
+		m, _ := strconv.Atoi(ms[0])
+		s, _ := strconv.Atoi(ms[1])
+		song.SongLink += "?t=" + strconv.Itoa(m*60+s)
+	}
+}
+
+func getThumb(song *audd.RecognitionResult) string {
+	thumb := song.SongLink + "?thumb"
+	if strings.Contains(song.SongLink, "youtu.be/") {
+		thumb = "https://i3.ytimg.com/vi/" + strings.ReplaceAll(song.SongLink, "https://youtu.be/", "") + "/maxresdefault.jpg"
+	}
+	if song.SongLink == "https://lis.tn/VhpgG" || song.SongLink == "" {
+		song.SongLink = "https://www.youtube.com/results?search_query=" + url.QueryEscape(song.Artist+" - "+song.Title)
+		thumb = ""
+	}
+	return thumb
+}
+
 func (c *BotConfig) getResult(results []audd.RecognitionResult, includePlaysOn, includeScore bool,
-	baseMessage *discordgo.MessageSend) *discordgo.MessageSend {
+	baseMessage *discordgo.MessageSend, canCompress bool) *discordgo.MessageSend {
 
 	if baseMessage == nil {
 		baseMessage = &discordgo.MessageSend{}
+	}
+	if len(results) > 1 {
+		baseMessage.Content += "I got matches with these songs:"
+	}
+	compressToText := len(results) >= c.UncompressedLimit && c.UncompressedLimit != -1 && canCompress
+	compressToEmbeds := len(results) >= c.UncompressedLimit && c.UncompressedLimit != -1 && !canCompress
+	if compressToText {
+		texts := make([]string, 0)
+		for _, song := range results {
+			addTimecodeToLink(&song)
+			score := strconv.Itoa(song.Score) + "%"
+			text := fmt.Sprintf("[**%s** by %s](%s)",
+				song.Title, song.Artist, song.SongLink)
+			if includeScore {
+				text += fmt.Sprintf(" (%s; matched: `%s`)", song.Timecode, score)
+			}
+			releaseInfo := getReleaseInfoString(&song)
+			if releaseInfo != "" {
+				text += fmt.Sprintf("\n%s.",
+					releaseInfo)
+			}
+			texts = append(texts, text)
+		}
+		if len(texts) == 1 {
+			baseMessage.Content += texts[0]
+		} else {
+			for _, text := range texts {
+				// response += fmt.Sprintf("\n\n%d. %s", i+1, text)
+				baseMessage.Content += fmt.Sprintf("\n\n• %s", text)
+			}
+		}
+		return baseMessage
 	}
 	if baseMessage.Embeds == nil {
 		baseMessage.Embeds = make([]*discordgo.MessageEmbed, 0)
 	}
 	resultEmbeds := make([]*discordgo.MessageEmbed, 0)
 	for i, result := range results {
-		thumb := result.SongLink + "?thumb"
-		if strings.Contains(result.SongLink, "youtu.be/") {
-			thumb = "https://i3.ytimg.com/vi/" + strings.ReplaceAll(result.SongLink, "https://youtu.be/", "") + "/maxresdefault.jpg"
-		}
-		if result.SongLink == "https://lis.tn/VhpgG" || result.SongLink == "" {
-			result.SongLink = "https://www.youtube.com/results?search_query=" + url.QueryEscape(result.Artist+" - "+result.Title)
+		thumb := getThumb(&result)
+		/*if i > 0 && !compress {
 			thumb = ""
-		}
-		if i > 0 {
-			thumb = ""
-		}
-		if strings.Contains(result.Timecode, ":") {
-			ms := strings.Split(result.Timecode, ":")
-			minutes, _ := strconv.Atoi(ms[0])
-			seconds, _ := strconv.Atoi(ms[1])
-			result.SongLink += "?t=" + strconv.Itoa(minutes*60+seconds)
-		}
+		}*/
+		addTimecodeToLink(&result)
+		score := strconv.Itoa(result.Score) + "%"
 		fields := make([]*discordgo.MessageEmbedField, 0)
 		if includePlaysOn {
 			fields = append(fields, &discordgo.MessageEmbedField{
@@ -868,12 +933,44 @@ func (c *BotConfig) getResult(results []audd.RecognitionResult, includePlaysOn, 
 			})
 		}
 		if includeScore {
-			score := strconv.Itoa(result.Score) + "%"
 			fields = append(fields, &discordgo.MessageEmbedField{
 				Name:   "Matched",
 				Value:  score,
 				Inline: true,
 			})
+		}
+		if i >= c.CompressStartingWith && compressToEmbeds {
+			description := fmt.Sprintf("By **%s**\n\n", result.Artist)
+			/*if includeScore && includePlaysOn {
+				description += fmt.Sprintf("At %s; matched: `%s`\n\n", result.Timecode, score)
+			} else if includeScore {
+				description += fmt.Sprintf("Matched: `%s`\n\n", score)
+			} else if includePlaysOn {
+				description += fmt.Sprintf("At %s\n\n", result.Timecode)
+			}*/
+			description += getReleaseInfoString(&result)
+			embed := &discordgo.MessageEmbed{
+				URL:         result.SongLink,
+				Title:       result.Title,
+				Description: description,
+				Color:       3066993,
+				Thumbnail:   nil,
+				Author:      nil,
+				Fields:      fields,
+			}
+			if thumb != "" {
+				embed.Thumbnail = &discordgo.MessageEmbedThumbnail{
+					URL: thumb,
+				}
+			}
+			if len(baseMessage.Embeds) == 0 {
+				embed.Footer = &discordgo.MessageEmbedFooter{
+					Text:    "Powered by AudD Music Recognition API",
+					IconURL: "https://audd.io/pride_logo_outline_100px.png",
+				}
+			}
+			resultEmbeds = append(resultEmbeds, embed)
+			continue
 		}
 		if result.Album != "" {
 			fields = append(fields, &discordgo.MessageEmbedField{
@@ -900,7 +997,7 @@ func (c *BotConfig) getResult(results []audd.RecognitionResult, includePlaysOn, 
 			URL:         result.SongLink,
 			Type:        "",
 			Title:       result.Title,
-			Description: "By " + result.Artist,
+			Description: "By **" + result.Artist + "**",
 			Color:       3066993,
 			Thumbnail:   nil,
 			Author:      nil,
