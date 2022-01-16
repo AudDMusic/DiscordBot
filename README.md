@@ -4,17 +4,17 @@ A music recognition bot for Discord. Uses the [Music Recognition API](https://au
 ![Discord bot](https://audd.tech/discord.jpg?)
 
 ## How to run it:
-- Get a token from [AudD Telegram bot](https://t.me/auddbot?start=api) and copy it to the AudDToken variable
+- Get a token from [AudD](https://dashboard.audd.io) and copy it to the AudDToken in *config.json*
 - Create an application here: https://discordapp.com/developers/applications
-- Copy the secret to the DiscordToken variable and get the Client ID
+- Copy the secret to the DiscordToken in config.json and the Client ID to DiscordAppID in *config.json*
 - Create a bot
-- Run the discord-bot (e.g. `go run main.go`)
-- Open `https://discordapp.com/api/oauth2/authorize?client_id=<INSERT CLIENT ID HERE>&permissions=1049088&scope=bot` and add the bot to a server
+- Build and run the discordBot (e.g. `go build && ./discordBot`)
+- Open `https://discordapp.com/api/oauth2/authorize?client_id=<INSERT CLIENT ID HERE>&permissions=277026819136&scope=bot%20applications.commands` and add the bot to a server
 
 ## How to use it
-- To recognize a song from a voice channel, type !song or !recognize
-- It's better to also mention users who are playing the song (like !song @MusicBot)
-- If you want the bot to listen to a channel so it can immediately recognize the song from the last 15 second of audio, type !listen.
+- To identify a song from an audio/video file or a link, reply to it with !song or or right-click on the message and pick App -> Recognize This Song
+- To recognize music from a voice channel, send `!song @mention` or /vs-song slash command, mentioning the person who is playing the song (like !song @MusicBot)
+- If you want the bot to listen to a channel so it can immediately recognize the song from the last 15 second of audio, type !listen or use the /listen slash command.
 
 ## How to use it with the streams
 
@@ -23,12 +23,11 @@ If you have a stream, with this bot you can automatically post all the songs to 
 ![Discord bot](https://audd.tech/discord2.png)
 
 ### How to run it for streams
-- Add a stream to the API with the [Music Recognition API for streams](https://streams.audd.io/)
-- uncomment lines 39 and 63
-- make a setCallbackUrl request:
-  * https://api.audd.io/setCallbackUrl/?api_token=YOUR_TOKEN&url=http://YOUR_SERVER_IP:4545/?secret=SECRET_CALLBACK_TOKEN%26chats=CHAT_LIST
-  * CHAT_LIST is a string with JSON of radio_ids and comma-separated Discord text channel ids, like `{"1":"705141908...,719623447...,731869898...","2":"731869943..."}`
-  * SECRET_CALLBACK_TOKEN is any string you want. Need it to ensure the callbacks are from a trusted source.
-- set the value of the secretCallbackToken variable on line 39 to SECRET_CALLBACK_TOKEN from above 
+- Add a stream to the API with the [Music Recognition API for streams](https://docs.audd.io/streams/)
+- change `127.0.0.1:port` to `:port` in *config.json* 
+- make a setCallbackUrl API request:
+  * https://api.audd.io/setCallbackUrl/?api_token=YOUR_AUDD_TOKEN&url=http://YOUR_SERVER_IP:4541/?secret=SECRET_CALLBACK_TOKEN%26chat=CHAT_ID
+  * CHAT_ID is the Discord chat ID where the bot will post the recognition results.
+  * SECRET_CALLBACK_TOKEN is any string you want. Need it to ensure the callbacks are from a trusted source. Add it to *config.json*.
 
-Quik tip: the bot prints IDs of all the text channel it has access to when it restarts or is being added to a new server.
+The bot prints IDs of all the text channel it has access to when it restarts or is being added to a new server or on the !here command.
