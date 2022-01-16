@@ -47,7 +47,7 @@ var AudDClient *audd.Client
 
 const enterpriseChunkLength = 12
 
-//ToDo: create a good help message
+//ToDo: make a good help message
 var help = "👋 Hi! I'm a music recognition bot. I'm still in testing and might restart from time to time. Please report any bugs if you experience them.\n\n" +
 	"If you see an audio or a video and want to know what's the music, you can reply to it with !song, and the " +
 	"bot will identify the music (the commands are subject to change). Or make a right click on the message and pick Apps " +
@@ -57,9 +57,9 @@ var help = "👋 Hi! I'm a music recognition bot. I'm still in testing and might
 	"identify the song. (The same as slash /song-vc command.)\n\n" +
 	"On a voice channel, you can also use the !listen command, so the bot joins, listens, and keeps the last 12 seconds " +
 	"of audio in it's memory, and when you type !song [mention], it will immediately identify music from the last 12 " +
-	"seconds. (The same as the slash /listen command.) If you send !stop-listening, the bot will leave the VC. (The same as the /stop-listening command.)"
+	"seconds. (The same as the slash /listen command.) If you send !disconnect, the bot will leave the VC. (The same as the /disconnect command.)"
 
-// ToDo: move from PCM to recording OPUS? E.g., using https://github.com/bwmarrin/dca (or https://github.com/jonas747/dca)
+// ToDo: move from converting to PCM and stacking to directly recording OPUS? E.g., something like https://github.com/bwmarrin/dca or https://github.com/jonas747/dca
 
 func main() {
 	cfg, err := loadConfig(configFile)
@@ -397,7 +397,7 @@ var ApplicationCommands = []*discordgo.ApplicationCommand{
 	},
 	{
 		Type:        discordgo.ChatApplicationCommand,
-		Name:        "stop-listening",
+		Name:        "disconnect",
 		Description: "Leave the voice channel",
 	},
 	{
@@ -509,7 +509,7 @@ var commandHandlers = map[string]func(c *BotConfig, s *discordgo.Session, i *dis
 			},
 		}))
 	},
-	"stop-listening": func(c *BotConfig, s *discordgo.Session, i *discordgo.InteractionCreate) {
+	"disconnect": func(c *BotConfig, s *discordgo.Session, i *discordgo.InteractionCreate) {
 		if i.Member == nil {
 			return
 		}
@@ -558,8 +558,8 @@ func (c *BotConfig) messageCreate(s *discordgo.Session, m *discordgo.MessageCrea
 		return
 	}
 	compare := getBodyToCompare(m.Content)
-	trigger := substringInSlice(compare, c.Triggers)
-	if trigger {
+	triggered, trigger := substringInSlice(compare, c.Triggers)
+	if triggered {
 		reactedToUrl, message := c.HandleQuery(s, m.Message) // Try to find a video or an audio and react to it
 		if reactedToUrl {
 			if message != nil {
@@ -575,7 +575,12 @@ func (c *BotConfig) messageCreate(s *discordgo.Session, m *discordgo.MessageCrea
 		if capture(err) {
 			return
 		}
-		_, message = c.SongVCCommand(s, m.Author.ID, UserToListenTo, channel.GuildID, m.Reference())
+		replyInAnyCase, message := c.SongVCCommand(s, m.Author.ID, UserToListenTo, channel.GuildID, m.Reference())
+		if !replyInAnyCase {
+			if strings.Count(compare, " ") > strings.Count(trigger, " ")+2 {
+				return
+			}
+		}
 		if message != nil {
 			c.sendResult(m.ChannelID, message, false)
 		}
@@ -588,7 +593,7 @@ func (c *BotConfig) messageCreate(s *discordgo.Session, m *discordgo.MessageCrea
 		}
 		_, _ = s.ChannelMessageSendReply(m.ChannelID, reply, m.Reference()) // ToDo: Add GitHub and Report bug components to all the messages like this one?
 	}
-	if strings.HasPrefix(m.Content, "!stop-listening") {
+	if strings.HasPrefix(m.Content, "!disconnect") {
 		_, reply := c.StopListeningCommand(s, m.GuildID, m.Author.ID)
 		_, _ = s.ChannelMessageSendReply(m.ChannelID, reply, m.Reference())
 	}
@@ -612,12 +617,12 @@ func (c *BotConfig) SongVCCommand(s *discordgo.Session,
 		if UserToListenTo == "" {
 			reply := &discordgo.MessageSend{
 				Content: "Please mention the user playing the music in a voice channel (like !song @musicbot) or " +
-					"reply to a message with an audio file or a link to the audio file",
+					"reply with !song to a message with an audio file or a link to the audio file and I'll identify the music",
 			}
 			if reference != nil {
 				reply.Reference = reference
 			}
-			return false, reply
+			return true, reply
 		}
 		mu.Lock()
 		existedBuf, alreadySet := serverBuffers[g.ID+"-"+vs.ChannelID]
@@ -663,7 +668,7 @@ func (c *BotConfig) SongVCCommand(s *discordgo.Session,
 }
 
 //ToDo: leave the VC if it's empty/the person who added it has left
-//ToDo: a setting for changing from 12 seconds to other numbers
+//ToDo: a setting allowing to change from 12 to other numbers of  seconds
 
 type GuildChPair struct {
 	GuildID   string
@@ -735,10 +740,13 @@ func (c *BotConfig) StopListeningCommand(s *discordgo.Session, GuildID, UserID s
 				response = leavingResponse
 				return
 			}
+			if response == "" {
+				response = "Sorry, if the person who invited me to listen to the voice channel is still on the voice channel, only " +
+					"they can use this command"
+			}
 		}
 		if response == "" {
-			response = "Sorry, if the person who invited me to listen to the voice channel is still on the voice channel, only " +
-				"they can use this command"
+			response = "I don't think I'm on the same voice channel as you are"
 		}
 		return
 	}
