@@ -1,6 +1,7 @@
 {
   "AudDToken": "",
   "DiscordToken": "",
+  "DiscordAppID": "",
   "SecretCallbackToken": "",
   "CallbacksAddr": "127.0.0.1:4541",
   "Triggers": [
