@@ -11,5 +11,8 @@
   ],
   "MaxReplyDepth": 3,
   "MinScore": 65,
+  "UncompressedLimit": 2,
+  "CompressStartingWith": 0,
+  "CanCompressWithoutSlash": false,
   "SentryDSN": ""
 }
