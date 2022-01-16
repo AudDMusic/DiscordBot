@@ -164,6 +164,7 @@ func listenBuffer(in chan *discordgo.Packet, size time.Duration, onClose func())
 			select {
 			case <-stop:
 				close(out)
+				stop <- struct{}{}
 				return
 			case <-started:
 				isStarted = true
