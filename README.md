@@ -1,5 +1,8 @@
 # DiscordBot
+
 A music recognition bot for Discord. Uses the [Music Recognition API](https://audd.io/).
+
+[Try it on our server!](https://audd.app/discord-bot-server-invite)
 
 [![Discord bot](https://audd.tech/discord.jpg?)](https://www.youtube.com/watch?v=HcORAQzwTdM)
 
