@@ -175,7 +175,6 @@ type serverBuffer struct {
 	buf             chan *discordgo.Packet
 	start           chan struct{}
 	stop            chan struct{}
-	LastUser        string
 	InitiatedByUser string
 }
 
@@ -187,6 +186,7 @@ func (v *serverBuffer) Stop() {
 }
 
 var serverBuffers = map[string]serverBuffer{}
+var lastUserListenedTo = map[string]string{}
 var mu sync.Mutex
 
 var rxStrict = xurls.Strict()
@@ -612,7 +612,7 @@ func (c *BotConfig) SongVCCommand(s *discordgo.Session,
 		}
 		if UserToListenTo == "" {
 			mu.Lock()
-			UserToListenTo = serverBuffers[g.ID+"-"+vs.ChannelID].LastUser
+			UserToListenTo = lastUserListenedTo[g.ID+"-"+vs.ChannelID]
 			mu.Unlock()
 		}
 		if UserToListenTo == "" {
@@ -627,8 +627,7 @@ func (c *BotConfig) SongVCCommand(s *discordgo.Session,
 		}
 		mu.Lock()
 		existedBuf, alreadySet := serverBuffers[g.ID+"-"+vs.ChannelID]
-		existedBuf.LastUser = UserToListenTo
-		serverBuffers[g.ID+"-"+vs.ChannelID] = existedBuf
+		lastUserListenedTo[g.ID+"-"+vs.ChannelID] = UserToListenTo
 		mu.Unlock()
 		var audioBuf []byte
 
@@ -643,10 +642,39 @@ func (c *BotConfig) SongVCCommand(s *discordgo.Session,
 			/*_, _ = s.ChannelMessageSendReply(m.ChannelID, "I'm listening to the audio for 12 seconds and "+
 			"will identify the song after that",
 			m.Reference())*/
+			/*
+				if !c.BotInvitedToVC(s, GuildID, UserID) {
+					reply := &discordgo.MessageSend{
+						Content: "Sorry, I can't find a voice channel you're in",
+					}
+					if reference != nil {
+						reply.Reference = reference
+					}
+					return true, reply
+				}
+				// audioBuf, err = c.recordSound(s, g.ID, vs.ChannelID, UserToListenTo)
+				mu.Lock()
+				existedBuf = serverBuffers[g.ID+"-"+vs.ChannelID]
+				mu.Unlock()
+				audioBuf, err = c.getBufferBytes(existedBuf, UserToListenTo)
+				existedBuf.Stop()
+				mu.Lock()
+				delete(serverBuffers, g.ID+"-"+vs.ChannelID)
+				mu.Unlock()
+			*/
 			audioBuf, err = c.recordSound(s, g.ID, vs.ChannelID, UserToListenTo)
 			mu.Lock()
 			delete(serverBuffers, g.ID+"-"+vs.ChannelID)
 			mu.Unlock()
+		}
+		if capture(err) || audioBuf == nil {
+			reply := &discordgo.MessageSend{
+				Content: "Sorry, I couldn't capture any audio",
+			}
+			if reference != nil {
+				reply.Reference = reference
+			}
+			return true, reply
 		}
 		fmt.Println("Recognizing from a buffer")
 		result, err := AudDClient.RecognizeLongAudio(audioBuf,
@@ -680,9 +708,17 @@ type GuildChPair struct {
 var UsersInvitedBot = map[string]GuildChPair{}
 
 func (c *BotConfig) ListenCommand(s *discordgo.Session, GuildID, UserID string) string {
+	if c.BotInvitedToVC(s, GuildID, UserID) {
+		return "Listening!\n" +
+			"Type !song with a mention to recognize a song played by someone mentioned."
+	}
+	return ""
+}
+
+func (c *BotConfig) BotInvitedToVC(s *discordgo.Session, GuildID, UserID string) bool {
 	g, err := s.State.Guild(GuildID)
 	if capture(err) {
-		return ""
+		return false
 	}
 	mu.Lock()
 	ch, exists := UsersInvitedBot[UserID]
@@ -697,16 +733,17 @@ func (c *BotConfig) ListenCommand(s *discordgo.Session, GuildID, UserID string) 
 		}
 		err := CreateAndStartBuffer(s, g.ID, vs.ChannelID, UserID)
 		if capture(err) {
-			return ""
+			return false
 		}
 		mu.Lock()
 		UsersInvitedBot[UserID] = GuildChPair{GuildID: GuildID, ChannelID: vs.ChannelID}
 		mu.Unlock()
-		return "Listening!\n" +
-			"Type !song or !recognize with a mention to recognize a song played by someone mentioned."
+		return true
 	}
-	return ""
+	return false
+
 }
+
 func (c *BotConfig) StopListeningCommand(s *discordgo.Session, GuildID, UserID string) (left bool, response string) {
 	leavingResponse := "Bye!"
 	mu.Lock()
@@ -748,7 +785,7 @@ func (c *BotConfig) StopListeningCommand(s *discordgo.Session, GuildID, UserID s
 			}
 		}
 		if response == "" {
-			response = "I don't think I'm on the same voice channel as you are"
+			response = "I don't think I was invited with !listen to the voice channel you are on"
 		}
 		return
 	}
