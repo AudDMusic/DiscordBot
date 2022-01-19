@@ -9,7 +9,7 @@ import (
 	"github.com/cryptix/wav"
 	"github.com/orcaman/writerseeker"
 	"io"
-	"os"
+	"sync"
 	"time"
 )
 
@@ -50,8 +50,39 @@ func startBuffer(s *discordgo.Session, guildID, channelID, initiatedByUserID str
 		capture(vc.Disconnect())
 	}
 
-	audioBuf, started, stop := listenBuffer(recv, time.Second*12, onClose)
+	audioBuf, started, stop := listenBuffer(recv, time.Second*time.Duration(RecordSeconds), onClose)
 	return serverBuffer{buf: audioBuf, start: started, stop: stop, InitiatedByUser: initiatedByUserID}, nil
+}
+
+const RecordSeconds = 12
+
+func exitStreamsOnMute(alreadyCancelled *bool, cancelMu *sync.Mutex, recv chan *discordgo.Packet) {
+	sleepBeforeCheckingForMute := 5
+	time.Sleep(time.Second * time.Duration(sleepBeforeCheckingForMute))
+	cancelMu.Lock()
+	if *alreadyCancelled {
+		return
+	}
+	select {
+	case recv <- &discordgo.Packet{
+		Type: []byte("mute-check"),
+	}:
+	default:
+	}
+	cancelMu.Unlock()
+	time.Sleep(time.Second * time.Duration(RecordSeconds-sleepBeforeCheckingForMute+2))
+	cancelMu.Lock()
+	if *alreadyCancelled {
+		return
+	}
+	select {
+	case recv <- &discordgo.Packet{
+		Type: []byte("check-exit"),
+	}:
+	default:
+	}
+	cancelMu.Unlock()
+
 }
 
 func (c *BotConfig) recordSound(s *discordgo.Session, guildID, channelID string, User string) ([]byte, error) {
@@ -59,16 +90,22 @@ func (c *BotConfig) recordSound(s *discordgo.Session, guildID, channelID string,
 	if err != nil {
 		return nil, err
 	}
+	cancelled := false
+	cancelMu := &sync.Mutex{}
 	defer func() {
+		cancelMu.Lock()
+		cancelled = true
+		cancelMu.Unlock()
 		capture(vc.Disconnect())
 	}()
 	recv := make(chan *discordgo.Packet, 2)
 	go dgvoice.ReceivePCM(vc, recv)
-	out, err := os.Create("output.pcm")
+	go exitStreamsOnMute(&cancelled, cancelMu, recv)
+	//out, err := os.Create("output.pcm")
 	if err != nil {
 		return nil, err
 	}
-	defer captureFunc(out.Close)
+	//defer captureFunc(out.Close)
 	audioBuf, err := getWavAudio(recv, false, User)
 	if err != nil {
 		return nil, err
@@ -95,9 +132,24 @@ func getWavAudio(in chan *discordgo.Packet, readAll bool, User string) ([]byte, 
 	count := 0
 	PCMStreams := make(map[string][]int16)
 	for f := range in {
+		if bytes.Equal(f.Type, []byte("mute-check")) {
+			// Exit if the voice channel was mute
+			if count == 0 {
+				break
+			}
+			continue
+		}
 		if bytes.Equal(f.Type, []byte("stream-stop")) {
 			break
 		}
+		if bytes.Equal(f.Type, []byte("check-exit")) {
+			// So we can exit even if the voice channel has no sound after RecordSeconds seconds
+			break
+		}
+		/* if f.SSRC == 0 {
+			b, _ := json.Marshal(f)
+			fmt.Printf("Debug: SSRC: 0, full: %s\n", string(b))
+		} */
 		count++
 		u := checkSSRC(f.SSRC)
 		if u == "" {
@@ -111,10 +163,13 @@ func getWavAudio(in chan *discordgo.Packet, readAll bool, User string) ([]byte, 
 		PCMStreams[u] = append(PCMStreams[u], int16Slice...)
 		//PCMStreams[u] = append(PCMStreams[u], f.PCM...)
 		if !readAll {
-			if start.Add(time.Second * 12).Before(time.Now()) {
+			if start.Add(time.Second * time.Duration(RecordSeconds)).Before(time.Now()) {
 				break
 			}
 		}
+	}
+	if count == 0 {
+		return nil, nil
 	}
 	resultPCM := make([]int16, len(PCMStreams[User]))
 	for j := range PCMStreams[User] {
@@ -148,6 +203,8 @@ func listenBuffer(in chan *discordgo.Packet, size time.Duration, onClose func())
 	started := make(chan struct{}, 2)
 	stop := make(chan struct{}, 4)
 	out := make(chan *discordgo.Packet, 50000)
+	cancelMu := &sync.Mutex{}
+	cancelled := false
 	go func() {
 		// Added this so if there's no sound, the bot leaves the VC immediately without waiting for a packet
 		<-stop
@@ -166,11 +223,15 @@ func listenBuffer(in chan *discordgo.Packet, size time.Duration, onClose func())
 		for f := range in {
 			select {
 			case <-stop:
+				cancelMu.Lock()
+				cancelled = true
+				cancelMu.Unlock()
 				close(out)
 				stop <- struct{}{}
 				return
 			case <-started:
 				isStarted = true
+				go exitStreamsOnMute(&cancelled, cancelMu, out)
 			default:
 			}
 			if bytes.Equal(f.Type, []byte("stream-stop")) {
@@ -228,6 +289,9 @@ func checkSSRC(ssrc uint32) string {
 var usersSSRCs = map[string]int{}
 
 var h = discordgo.VoiceSpeakingUpdateHandler(func(vc *discordgo.VoiceConnection, vs *discordgo.VoiceSpeakingUpdate) {
+	/* if vc.GuildID == "731869831183335484" {
+		fmt.Printf("Debug: u %s with ssrc %d is speaking: %v\n", vs.UserID, vs.SSRC, vs.Speaking)
+	} */
 	if vs.Speaking {
 		mu.Lock()
 		usersSSRCs[vs.UserID] = vs.SSRC
