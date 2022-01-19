@@ -884,8 +884,8 @@ func (c *BotConfig) getResult(results []audd.RecognitionResult, includePlaysOn, 
 	if len(results) > 1 {
 		baseMessage.Content += "I got matches with these songs:"
 	}
-	compressToText := len(results) >= c.UncompressedLimit && c.UncompressedLimit != -1 && canCompress
-	compressToEmbeds := len(results) >= c.UncompressedLimit && c.UncompressedLimit != -1 && !canCompress
+	compressToText := len(results) > c.UncompressedLimit && c.UncompressedLimit != -1 && canCompress
+	compressToEmbeds := len(results) > c.UncompressedLimit && c.UncompressedLimit != -1 && !canCompress
 	if compressToText {
 		texts := make([]string, 0)
 		for _, song := range results {
