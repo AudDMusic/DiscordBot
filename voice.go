@@ -7,7 +7,8 @@ import (
 	"github.com/Mihonarium/dgvoice"
 	"github.com/Mihonarium/discordgo"
 	"github.com/cryptix/wav"
-	"io/ioutil"
+	"github.com/orcaman/writerseeker"
+	"io"
 	"os"
 	"time"
 )
@@ -81,10 +82,11 @@ func getWavAudio(in chan *discordgo.Packet, readAll bool, User string) ([]byte, 
 		SignificantBits: 16,
 		Channels:        1,
 	}
-	out, err := ioutil.TempFile("", "*.wav")
+	/*out, err := ioutil.TempFile("", "*.wav")
 	if err != nil {
 		return nil, err
-	}
+	}*/
+	out := &writerseeker.WriterSeeker{}
 	writer, err := file.NewWriter(out)
 	if err != nil {
 		return nil, err
@@ -134,11 +136,12 @@ func getWavAudio(in chan *discordgo.Packet, readAll bool, User string) ([]byte, 
 		}
 	}
 	capture(writer.Close())
-	buf, err := ioutil.ReadFile(out.Name())
+	bytesBuf := &bytes.Buffer{}
+	_, err = io.Copy(bytesBuf, out.Reader())
 	if err != nil {
 		return nil, err
 	}
-	return buf, nil
+	return bytesBuf.Bytes(), nil
 }
 
 func listenBuffer(in chan *discordgo.Packet, size time.Duration, onClose func()) (chan *discordgo.Packet, chan struct{}, chan struct{}) {
