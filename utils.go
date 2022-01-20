@@ -3,7 +3,10 @@ package main
 import (
 	"fmt"
 	"github.com/Mihonarium/discordgo"
+	"github.com/getsentry/sentry-go"
 	"net/url"
+	"reflect"
+	"runtime"
 	"strconv"
 	"strings"
 )
@@ -155,4 +158,76 @@ func substringInSlice(s string, slice []string) (bool, string) {
 		}
 	}
 	return false, ""
+}
+
+func filterFrames(frames []sentry.Frame) []sentry.Frame {
+	if len(frames) == 0 {
+		return nil
+	}
+	filteredFrames := make([]sentry.Frame, 0, len(frames))
+	for _, frame := range frames {
+		if frame.Module == "runtime" || frame.Module == "testing" {
+			continue
+		}
+		if frame.Module == "main" && strings.HasPrefix(frame.Function, "capture") {
+			continue
+		}
+		filteredFrames = append(filteredFrames, frame)
+	}
+	return filteredFrames
+}
+
+func capture(err error) bool {
+	extractFrames := func(pcs []uintptr) []sentry.Frame {
+		var frames []sentry.Frame
+		callersFrames := runtime.CallersFrames(pcs)
+		for {
+			callerFrame, more := callersFrames.Next()
+
+			frames = append([]sentry.Frame{
+				sentry.NewFrame(callerFrame),
+			}, frames...)
+
+			if !more {
+				break
+			}
+		}
+		return frames
+	}
+	GetStacktrace := func() *sentry.Stacktrace {
+		pcs := make([]uintptr, 100)
+		n := runtime.Callers(1, pcs)
+		if n == 0 {
+			return nil
+		}
+		frames := extractFrames(pcs[:n])
+		frames = filterFrames(frames)
+		stacktrace := sentry.Stacktrace{
+			Frames: frames,
+		}
+		return &stacktrace
+	}
+	if err == nil {
+		return false
+	}
+	event := sentry.NewEvent()
+	event.Exception = append(event.Exception, sentry.Exception{
+		Value:      err.Error(),
+		Type:       reflect.TypeOf(err).String(),
+		Stacktrace: GetStacktrace(),
+	})
+	event.Level = sentry.LevelError
+	hub := sentry.CurrentHub()
+	client, scope := hub.Client(), hub.Scope()
+	go client.CaptureEvent(event, &sentry.EventHint{OriginalException: err}, scope)
+	/* _, file, no, ok := runtime.Caller(1)
+	if ok {
+		err = fmt.Errorf("%v from %s#%d", err, file, no)
+	}
+	go sentry.CaptureException(err) */
+	go fmt.Println(err.Error())
+	return true
+}
+func captureFunc(f func() error) bool {
+	return capture(f())
 }

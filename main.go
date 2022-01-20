@@ -14,7 +14,6 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -1093,21 +1092,4 @@ func (c *BotConfig) sendResult(channelID string, message *discordgo.MessageSend,
 			return
 		}
 	}
-}
-
-//ToDo: fix error capturing
-func capture(err error) bool {
-	if err == nil {
-		return false
-	}
-	_, file, no, ok := runtime.Caller(1)
-	if ok {
-		err = fmt.Errorf("%v from %s#%d", err, file, no)
-	}
-	go sentry.CaptureException(err)
-	go fmt.Println(err.Error())
-	return true
-}
-func captureFunc(f func() error) bool {
-	return capture(f())
 }
