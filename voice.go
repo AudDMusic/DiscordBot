@@ -235,6 +235,9 @@ func listenBuffer(in chan *discordgo.Packet, size time.Duration, onClose func())
 			default:
 			}
 			if bytes.Equal(f.Type, []byte("stream-stop")) {
+				cancelMu.Lock()
+				cancelled = true
+				cancelMu.Unlock()
 				close(out)
 				return
 			}
