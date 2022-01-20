@@ -317,6 +317,7 @@ func (c *BotConfig) getMessageFromRecognitionResult(result []audd.RecognitionEnt
 			}
 			if textResponse == "" {
 				capture(err)
+				textResponse = "Sorry, there's been an error while processing the audio"
 			}
 		}
 		if textResponse == "" {
