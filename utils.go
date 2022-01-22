@@ -218,11 +218,6 @@ func capture(err error) bool {
 	hub := sentry.CurrentHub()
 	client, scope := hub.Client(), hub.Scope()
 	go client.CaptureEvent(event, &sentry.EventHint{OriginalException: err}, scope)
-	/* _, file, no, ok := runtime.Caller(1)
-	if ok {
-		err = fmt.Errorf("%v from %s#%d", err, file, no)
-	}
-	go sentry.CaptureException(err) */
 	go fmt.Println(err.Error())
 	return true
 }

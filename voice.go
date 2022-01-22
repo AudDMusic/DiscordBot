@@ -119,10 +119,6 @@ func getWavAudio(in chan *discordgo.Packet, readAll bool, userToListenToID strin
 		SignificantBits: 16,
 		Channels:        1,
 	}
-	/*out, err := ioutil.TempFile("", "*.wav")
-	if err != nil {
-		return nil, err
-	}*/
 	out := &writerseeker.WriterSeeker{}
 	writer, err := file.NewWriter(out)
 	if err != nil {
@@ -146,10 +142,6 @@ func getWavAudio(in chan *discordgo.Packet, readAll bool, userToListenToID strin
 			// So we can exit even if the voice channel has no sound after RecordSeconds seconds
 			break
 		}
-		/* if f.SSRC == 0 {
-			b, _ := json.Marshal(f)
-			fmt.Printf("Debug: SSRC: 0, full: %s\n", string(b))
-		} */
 		count++
 		u := checkSSRC(f.SSRC)
 		if u == "" {
@@ -291,9 +283,6 @@ func checkSSRC(ssrc uint32) string {
 var usersSSRCs = map[string]int{}
 
 var h = discordgo.VoiceSpeakingUpdateHandler(func(vc *discordgo.VoiceConnection, vs *discordgo.VoiceSpeakingUpdate) {
-	/* if vc.GuildID == "731869831183335484" {
-		fmt.Printf("Debug: u %s with ssrc %d is speaking: %v\n", vs.UserID, vs.SSRC, vs.Speaking)
-	} */
 	if vs.Speaking {
 		mu.Lock()
 		usersSSRCs[vs.UserID] = vs.SSRC
