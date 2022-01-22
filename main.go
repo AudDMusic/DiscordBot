@@ -9,7 +9,7 @@ import (
 	"github.com/getsentry/sentry-go"
 	"github.com/kodova/html-to-markdown/escape"
 	_ "github.com/youpy/go-wav"
-	"io/ioutil"
+	"io"
 	"mvdan.cc/xurls/v2"
 	"net/http"
 	"net/url"
@@ -120,7 +120,7 @@ func main() {
 }
 
 func (c *BotConfig) HandleCallback(_ http.ResponseWriter, r *http.Request) {
-	b, err := ioutil.ReadAll(r.Body)
+	b, err := io.ReadAll(r.Body)
 	defer captureFunc(r.Body.Close)
 	if capture(err) {
 		return
@@ -333,13 +333,12 @@ func (c *BotConfig) getMessageFromRecognitionResult(result []audd.RecognitionEnt
 	return nil
 }
 
-func GetSongs(result []audd.RecognitionEnterpriseResult, minScore int) ([]audd.RecognitionResult, int) {
+func GetSongs(result []audd.RecognitionEnterpriseResult, minScore int) (songs []audd.RecognitionResult, highestScore int) {
 	if len(result) == 0 {
-		return nil, 0
+		return
 	}
-	highestScore := 0
+	songs = make([]audd.RecognitionResult, 0)
 	links := map[string]bool{}
-	songs := make([]audd.RecognitionResult, 0)
 	for _, results := range result {
 		if len(results.Songs) == 0 {
 			capture(fmt.Errorf("enterprise response has a result without any songs"))
@@ -375,7 +374,7 @@ func GetSongs(result []audd.RecognitionEnterpriseResult, minScore int) ([]audd.R
 			songs = append(songs, song)
 		}
 	}
-	return songs, highestScore
+	return
 }
 
 var ApplicationCommands = []*discordgo.ApplicationCommand{
@@ -461,11 +460,11 @@ var commandHandlers = map[string]func(c *BotConfig, s *discordgo.Session, i *dis
 			fmt.Println(string(b))
 			return
 		}
-		var UserToListenTo string
+		var UserToListenToID string
 		if data.Options != nil {
 			if len(data.Options) > 0 {
 				if data.Options[0].Type == discordgo.ApplicationCommandOptionUser {
-					UserToListenTo = data.Options[0].Value.(string)
+					UserToListenToID = data.Options[0].Value.(string)
 				}
 			}
 		}
@@ -475,7 +474,7 @@ var commandHandlers = map[string]func(c *BotConfig, s *discordgo.Session, i *dis
 				Content: "Collecting 12 seconds of audio...",
 			},
 		}))
-		_, message := c.SongVCCommand(s, i.Member.User.ID, UserToListenTo, i.GuildID, nil, true)
+		_, message := c.SongVCCommand(s, i.Member.User.ID, UserToListenToID, i.GuildID, nil, true)
 		if message == nil {
 			message = &discordgo.MessageSend{
 				Content: "Sorry, I experienced an unexpected error",
@@ -568,15 +567,15 @@ func (c *BotConfig) messageCreate(s *discordgo.Session, m *discordgo.MessageCrea
 			}
 			return
 		}
-		var UserToListenTo string
+		var UserToListenToID string
 		if len(m.Mentions) > 0 {
-			UserToListenTo = m.Mentions[0].ID
+			UserToListenToID = m.Mentions[0].ID
 		}
 		channel, err := s.State.Channel(m.ChannelID)
 		if capture(err) {
 			return
 		}
-		replyInAnyCase, message := c.SongVCCommand(s, m.Author.ID, UserToListenTo, channel.GuildID, m.Reference(), c.CanCompressWithoutSlash)
+		replyInAnyCase, message := c.SongVCCommand(s, m.Author.ID, UserToListenToID, channel.GuildID, m.Reference(), c.CanCompressWithoutSlash)
 		if !replyInAnyCase {
 			if strings.Count(compare, " ") > strings.Count(trigger, " ")+2 {
 				return
@@ -601,21 +600,21 @@ func (c *BotConfig) messageCreate(s *discordgo.Session, m *discordgo.MessageCrea
 }
 
 func (c *BotConfig) SongVCCommand(s *discordgo.Session,
-	UserID, UserToListenTo, GuildID string, reference *discordgo.MessageReference, canCompress bool) (bool, *discordgo.MessageSend) {
-	g, err := s.State.Guild(GuildID)
+	userID, userToListenToID, guildID string, reference *discordgo.MessageReference, canCompress bool) (bool, *discordgo.MessageSend) {
+	g, err := s.State.Guild(guildID)
 	if capture(err) {
 		return false, nil
 	}
 	for _, vs := range g.VoiceStates {
-		if vs.UserID != UserID {
+		if vs.UserID != userID {
 			continue
 		}
-		if UserToListenTo == "" {
+		if userToListenToID == "" {
 			mu.Lock()
-			UserToListenTo = lastUserListenedTo[g.ID+"-"+vs.ChannelID]
+			userToListenToID = lastUserListenedTo[g.ID+"-"+vs.ChannelID]
 			mu.Unlock()
 		}
-		if UserToListenTo == "" {
+		if userToListenToID == "" {
 			reply := &discordgo.MessageSend{
 				Content: "Please mention the user playing the music in a voice channel (like !song @musicbot) or " +
 					"reply with !song to a message with an audio file or a link to the audio file and I'll identify the music",
@@ -627,7 +626,7 @@ func (c *BotConfig) SongVCCommand(s *discordgo.Session,
 		}
 		mu.Lock()
 		existedBuf, alreadySet := serverBuffers[g.ID+"-"+vs.ChannelID]
-		lastUserListenedTo[g.ID+"-"+vs.ChannelID] = UserToListenTo
+		lastUserListenedTo[g.ID+"-"+vs.ChannelID] = userToListenToID
 		mu.Unlock()
 		var audioBuf []byte
 
@@ -637,13 +636,13 @@ func (c *BotConfig) SongVCCommand(s *discordgo.Session,
 		if alreadySet {
 			/*_, _ = s.ChannelMessageSendReply(m.ChannelID, "I'll identify the song in the 12 seconds of audio",
 			m.Reference())*/
-			audioBuf, err = c.getBufferBytes(existedBuf, UserToListenTo)
+			audioBuf, err = c.getBufferBytes(existedBuf, userToListenToID)
 		} else {
 			/*_, _ = s.ChannelMessageSendReply(m.ChannelID, "I'm listening to the audio for 12 seconds and "+
 			"will identify the song after that",
 			m.Reference())*/
 			/*
-				if !c.BotInvitedToVC(s, GuildID, UserID) {
+				if !c.BotInvitedToVC(s, guildID, userID) {
 					reply := &discordgo.MessageSend{
 						Content: "Sorry, I can't find a voice channel you're in",
 					}
@@ -652,17 +651,17 @@ func (c *BotConfig) SongVCCommand(s *discordgo.Session,
 					}
 					return true, reply
 				}
-				// audioBuf, err = c.recordSound(s, g.ID, vs.ChannelID, UserToListenTo)
+				// audioBuf, err = c.recordSound(s, g.ID, vs.ChannelID, userToListenToID)
 				mu.Lock()
 				existedBuf = serverBuffers[g.ID+"-"+vs.ChannelID]
 				mu.Unlock()
-				audioBuf, err = c.getBufferBytes(existedBuf, UserToListenTo)
+				audioBuf, err = c.getBufferBytes(existedBuf, userToListenToID)
 				existedBuf.Stop()
 				mu.Lock()
 				delete(serverBuffers, g.ID+"-"+vs.ChannelID)
 				mu.Unlock()
 			*/
-			audioBuf, err = c.recordSound(s, g.ID, vs.ChannelID, UserToListenTo)
+			audioBuf, err = c.recordSound(s, g.ID, vs.ChannelID, userToListenToID)
 			mu.Lock()
 			delete(serverBuffers, g.ID+"-"+vs.ChannelID)
 			mu.Unlock()
@@ -707,36 +706,36 @@ type GuildChPair struct {
 
 var UsersInvitedBot = map[string]GuildChPair{}
 
-func (c *BotConfig) ListenCommand(s *discordgo.Session, GuildID, UserID string) string {
-	if c.BotInvitedToVC(s, GuildID, UserID) {
+func (c *BotConfig) ListenCommand(s *discordgo.Session, guildID, userID string) string {
+	if c.BotInvitedToVC(s, guildID, userID) {
 		return "Listening!\n" +
 			"Type !song with a mention to recognize a song played by someone mentioned."
 	}
 	return ""
 }
 
-func (c *BotConfig) BotInvitedToVC(s *discordgo.Session, GuildID, UserID string) bool {
-	g, err := s.State.Guild(GuildID)
+func (c *BotConfig) BotInvitedToVC(s *discordgo.Session, guildID, userID string) bool {
+	g, err := s.State.Guild(guildID)
 	if capture(err) {
 		return false
 	}
 	mu.Lock()
-	ch, exists := UsersInvitedBot[UserID]
-	delete(UsersInvitedBot, UserID)
+	ch, exists := UsersInvitedBot[userID]
+	delete(UsersInvitedBot, userID)
 	mu.Unlock()
 	if exists {
 		StopBuffer(ch.GuildID, ch.ChannelID)
 	}
 	for _, vs := range g.VoiceStates {
-		if vs.UserID != UserID {
+		if vs.UserID != userID {
 			continue
 		}
-		err := CreateAndStartBuffer(s, g.ID, vs.ChannelID, UserID)
+		err := CreateAndStartBuffer(s, g.ID, vs.ChannelID, userID)
 		if capture(err) {
 			return false
 		}
 		mu.Lock()
-		UsersInvitedBot[UserID] = GuildChPair{GuildID: GuildID, ChannelID: vs.ChannelID}
+		UsersInvitedBot[userID] = GuildChPair{GuildID: guildID, ChannelID: vs.ChannelID}
 		mu.Unlock()
 		return true
 	}
@@ -744,11 +743,11 @@ func (c *BotConfig) BotInvitedToVC(s *discordgo.Session, GuildID, UserID string)
 
 }
 
-func (c *BotConfig) StopListeningCommand(s *discordgo.Session, GuildID, UserID string) (left bool, response string) {
+func (c *BotConfig) StopListeningCommand(s *discordgo.Session, guildID, userID string) (left bool, response string) {
 	leavingResponse := "Bye!"
 	mu.Lock()
-	ch, exists := UsersInvitedBot[UserID]
-	delete(UsersInvitedBot, UserID)
+	ch, exists := UsersInvitedBot[userID]
+	delete(UsersInvitedBot, userID)
 	mu.Unlock()
 	if exists {
 		// Allow kicking the bot by the user who invited it
@@ -756,7 +755,7 @@ func (c *BotConfig) StopListeningCommand(s *discordgo.Session, GuildID, UserID s
 		response = leavingResponse
 		left = true
 	}
-	g, err := s.State.Guild(GuildID)
+	g, err := s.State.Guild(guildID)
 	if capture(err) {
 		return
 	}
@@ -765,7 +764,7 @@ func (c *BotConfig) StopListeningCommand(s *discordgo.Session, GuildID, UserID s
 		UsersByChannels[vs.UserID] = vs.ChannelID
 	}
 	for _, vs := range g.VoiceStates {
-		if vs.UserID != UserID {
+		if vs.UserID != userID {
 			continue
 		}
 		mu.Lock()
@@ -774,7 +773,7 @@ func (c *BotConfig) StopListeningCommand(s *discordgo.Session, GuildID, UserID s
 		if isSet {
 			if UsersByChannels[existedBuf.InitiatedByUser] != vs.ChannelID {
 				// Allow kicking the bot by any user on the voice channel if the user who invited it has left
-				StopBuffer(GuildID, vs.ChannelID)
+				StopBuffer(guildID, vs.ChannelID)
 				left = true
 				response = leavingResponse
 				return
@@ -796,9 +795,9 @@ func (c *BotConfig) StopListeningCommand(s *discordgo.Session, GuildID, UserID s
 	return
 }
 
-func (c *BotConfig) getBufferBytes(buffer serverBuffer, User string) ([]byte, error) {
+func (c *BotConfig) getBufferBytes(buffer serverBuffer, userToListenToID string) ([]byte, error) {
 	buffer.Start()
-	audioBuf, err := getWavAudio(buffer.buf, true, User)
+	audioBuf, err := getWavAudio(buffer.buf, true, userToListenToID)
 	if err != nil {
 		return nil, err
 	}
@@ -811,7 +810,7 @@ func loadConfig(file string) (*BotConfig, error) {
 	if err != nil {
 		return nil, err
 	}
-	j, err := ioutil.ReadAll(f)
+	j, err := io.ReadAll(f)
 	if err != nil {
 		return nil, err
 	}
@@ -882,10 +881,8 @@ func getReleaseInfoString(song *audd.RecognitionResult) string {
 	}
 	if song.ReleaseDate != "" {
 		releaseDate = "Released on `" + song.ReleaseDate + "`"
-	} else {
-		if label != "" {
-			label = "Label: " + song.Label
-		}
+	} else if label != "" {
+		label = "Label: " + song.Label
 	}
 	return fmt.Sprintf("%s%s%s",
 		album, releaseDate, label)

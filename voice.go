@@ -85,7 +85,7 @@ func exitStreamsOnMute(alreadyCancelled *bool, cancelMu *sync.Mutex, recv chan *
 
 }
 
-func (c *BotConfig) recordSound(s *discordgo.Session, guildID, channelID string, User string) ([]byte, error) {
+func (c *BotConfig) recordSound(s *discordgo.Session, guildID, channelID, userToListenToID string) ([]byte, error) {
 	vc, err := s.ChannelVoiceJoin(guildID, channelID, true, false, &h)
 	if err != nil {
 		return nil, err
@@ -101,19 +101,19 @@ func (c *BotConfig) recordSound(s *discordgo.Session, guildID, channelID string,
 	recv := make(chan *discordgo.Packet, 2)
 	go dgvoice.ReceivePCM(vc, recv)
 	go exitStreamsOnMute(&cancelled, cancelMu, recv)
-	//out, err := os.Create("output.pcm")
+	// out, err := os.Create("output.pcm")
 	if err != nil {
 		return nil, err
 	}
-	//defer captureFunc(out.Close)
-	audioBuf, err := getWavAudio(recv, false, User)
+	// defer captureFunc(out.Close)
+	audioBuf, err := getWavAudio(recv, false, userToListenToID)
 	if err != nil {
 		return nil, err
 	}
 	return audioBuf, nil
 }
 
-func getWavAudio(in chan *discordgo.Packet, readAll bool, User string) ([]byte, error) {
+func getWavAudio(in chan *discordgo.Packet, readAll bool, userToListenToID string) ([]byte, error) {
 	file := wav.File{
 		SampleRate:      48000,
 		SignificantBits: 16,
@@ -161,7 +161,7 @@ func getWavAudio(in chan *discordgo.Packet, readAll bool, User string) ([]byte, 
 			PCMStreams[u] = make([]int16, 0)
 		}
 		PCMStreams[u] = append(PCMStreams[u], int16Slice...)
-		//PCMStreams[u] = append(PCMStreams[u], f.PCM...)
+		// PCMStreams[u] = append(PCMStreams[u], f.PCM...)
 		if !readAll {
 			if start.Add(time.Second * time.Duration(RecordSeconds)).Before(time.Now()) {
 				break
@@ -171,9 +171,9 @@ func getWavAudio(in chan *discordgo.Packet, readAll bool, User string) ([]byte, 
 	if count == 0 {
 		return nil, nil
 	}
-	resultPCM := make([]int16, len(PCMStreams[User]))
-	for j := range PCMStreams[User] {
-		resultPCM[j] += PCMStreams[User][j]
+	resultPCM := make([]int16, len(PCMStreams[userToListenToID]))
+	for j := range PCMStreams[userToListenToID] {
+		resultPCM[j] += PCMStreams[userToListenToID][j]
 	}
 	for i := 0; i < len(resultPCM); i++ {
 		buf := new(bytes.Buffer)
@@ -183,8 +183,7 @@ func getWavAudio(in chan *discordgo.Packet, readAll bool, User string) ([]byte, 
 		}
 		bytes_ := buf.Bytes()
 		var byteSlice []byte
-		byteSlice = append(byteSlice, bytes_[0])
-		byteSlice = append(byteSlice, bytes_[1])
+		byteSlice = append(byteSlice, bytes_[0], bytes_[1])
 		err = writer.WriteSample(byteSlice)
 		if err != nil {
 			return nil, err
@@ -199,10 +198,10 @@ func getWavAudio(in chan *discordgo.Packet, readAll bool, User string) ([]byte, 
 	return bytesBuf.Bytes(), nil
 }
 
-func listenBuffer(in chan *discordgo.Packet, size time.Duration, onClose func()) (chan *discordgo.Packet, chan struct{}, chan struct{}) {
-	started := make(chan struct{}, 2)
-	stop := make(chan struct{}, 4)
-	out := make(chan *discordgo.Packet, 50000)
+func listenBuffer(in chan *discordgo.Packet, size time.Duration, onClose func()) (audioBuffer chan *discordgo.Packet, started, stop chan struct{}) {
+	started = make(chan struct{}, 2)
+	stop = make(chan struct{}, 4)
+	audioBuffer = make(chan *discordgo.Packet, 50000)
 	cancelMu := &sync.Mutex{}
 	cancelled := false
 	go func() {
@@ -226,19 +225,19 @@ func listenBuffer(in chan *discordgo.Packet, size time.Duration, onClose func())
 				cancelMu.Lock()
 				cancelled = true
 				cancelMu.Unlock()
-				close(out)
+				close(audioBuffer)
 				stop <- struct{}{}
 				return
 			case <-started:
 				isStarted = true
-				go exitStreamsOnMute(&cancelled, cancelMu, out)
+				go exitStreamsOnMute(&cancelled, cancelMu, audioBuffer)
 			default:
 			}
 			if bytes.Equal(f.Type, []byte("stream-stop")) {
 				cancelMu.Lock()
 				cancelled = true
 				cancelMu.Unlock()
-				close(out)
+				close(audioBuffer)
 				return
 			}
 			if ticker == nil {
@@ -250,15 +249,15 @@ func listenBuffer(in chan *discordgo.Packet, size time.Duration, onClose func())
 					buffered = true
 					ticker.Stop()
 				default:
-					out <- f
+					audioBuffer <- f
 				}
 			}
 			if buffered && !isStarted {
-				<-out
-				out <- f
+				<-audioBuffer
+				audioBuffer <- f
 			}
 			if isStarted && buffered {
-				out <- &discordgo.Packet{
+				audioBuffer <- &discordgo.Packet{
 					Type: []byte("stream-stop"),
 				}
 				isStarted = false
@@ -267,7 +266,7 @@ func listenBuffer(in chan *discordgo.Packet, size time.Duration, onClose func())
 			}
 		}
 	}()
-	return out, started, stop
+	return audioBuffer, started, stop
 }
 
 func convertPCMToMono(pcm []int16) []int16 {

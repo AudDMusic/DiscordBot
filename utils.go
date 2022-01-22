@@ -14,21 +14,21 @@ import (
 func getBodyToCompare(body string) string {
 	return "\n" + strings.ReplaceAll(strings.ToLower(replaceSlice(body, "", "'", "’", "`")), "what is", "whats") + "?"
 }
-func replaceSlice(s, new string, oldStrings ...string) string {
+func replaceSlice(s, replaceWith string, oldStrings ...string) string {
 	for _, old := range oldStrings {
-		s = strings.ReplaceAll(s, old, new)
+		s = strings.ReplaceAll(s, old, replaceWith)
 	}
 	return s
 }
 
 func linksFromMessage(m *discordgo.Message) []string {
-	results := make([]string, 0)
+	links := make([]string, 0)
 	for _, a := range m.Attachments {
 		if a == nil {
 			continue
 		}
 		if a.URL != "" {
-			results = append(results, a.URL)
+			links = append(links, a.URL)
 		}
 	}
 	plaintextUrls := rxStrict.FindAllString(m.Content, -1)
@@ -37,16 +37,14 @@ func linksFromMessage(m *discordgo.Message) []string {
 		if strings.HasPrefix(plaintextUrls[i], "/") {
 			continue
 		}
-		results = append(results, plaintextUrls[i])
+		links = append(links, plaintextUrls[i])
 	}
-	return results
+	return links
 }
 
-func GetTimeFromText(s string) (int, int) {
+func GetTimeFromText(s string) (timeFrom, timeTo int) {
 	s = strings.ReplaceAll(s, " - ", "")
 	words := strings.Split(s, " ")
-	Time := 0
-	TimeTo := 0
 	maxScore := 0
 	for _, w := range words {
 		score := 0
@@ -64,13 +62,13 @@ func GetTimeFromText(s string) (int, int) {
 		if score > maxScore {
 			t, err := TimeStringToSeconds(w)
 			if err == nil {
-				Time = t
-				TimeTo, _ = TimeStringToSeconds(w2) // if w2 is empty or not a correct time, TimeTo is 0
+				timeFrom = t
+				timeTo, _ = TimeStringToSeconds(w2) // if w2 is empty or not a correct time, timeTo is 0
 				maxScore = score
 			}
 		}
 	}
-	return Time, TimeTo
+	return
 }
 
 func TimeStringToSeconds(s string) (int, error) {
@@ -78,16 +76,16 @@ func TimeStringToSeconds(s string) (int, error) {
 	if len(list) > 3 {
 		return 0, fmt.Errorf("too many : thingies")
 	}
-	result, multiplier := 0, 1
+	seconds, multiplier := 0, 1
 	for i := len(list) - 1; i >= 0; i-- {
 		c, err := strconv.Atoi(list[i])
 		if err != nil {
 			return 0, err
 		}
-		result += c * multiplier
+		seconds += c * multiplier
 		multiplier *= 60
 	}
-	return result, nil
+	return seconds, nil
 }
 func SecondsToTimeString(i int, includeHours bool) string {
 	if includeHours {
@@ -96,12 +94,12 @@ func SecondsToTimeString(i int, includeHours bool) string {
 	return fmt.Sprintf("%02d:%02d", i/60, i%60)
 }
 
-func GetSkipFirstFromLink(Url string) int {
+func GetSkipFirstFromLink(link string) int {
 	skip := 0
-	if strings.HasSuffix(Url, ".m3u8") {
+	if strings.HasSuffix(link, ".m3u8") {
 		return skip
 	}
-	u, err := url.Parse(Url)
+	u, err := url.Parse(link)
 	if err == nil {
 		t := u.Query().Get("t")
 		if t == "" {
@@ -151,13 +149,13 @@ func stringInSlice(slice []string, s string) bool {
 	return false
 }
 
-func substringInSlice(s string, slice []string) (bool, string) {
+func substringInSlice(s string, slice []string) (exists bool, substring string) {
 	for i := range slice {
 		if strings.Contains(s, slice[i]) {
 			return true, slice[i]
 		}
 	}
-	return false, ""
+	return
 }
 
 func filterFrames(frames []sentry.Frame) []sentry.Frame {
