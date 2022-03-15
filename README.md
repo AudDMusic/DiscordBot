@@ -11,12 +11,12 @@ A music recognition bot for Discord. Uses the [Music Recognition API](https://au
 - Create an application here: https://discordapp.com/developers/applications
 - Copy the secret to the DiscordToken in config.json and the Client ID to DiscordAppID in *config.json*
 - Create a bot
-- Build and run the discordBot (e.g. `go build && ./discordBot`)
+- Build and run the discordBot (e.g. `go build && ./discordBot`) or download compiled build from [GitHub Action](https://github.com/AudDMusic/DiscordBot/actions/workflows/go.yml)
 - Open `https://discordapp.com/api/oauth2/authorize?client_id=<INSERT CLIENT ID HERE>&permissions=277026819136&scope=bot%20applications.commands` and add the bot to a server
 
 ## How to use it
 - To identify a song from an audio/video file or a link, reply to it with !song or or right-click on the message and pick App -> Recognize This Song
-- To recognize music from a voice channel, send `!song @mention` or /vs-song slash command, mentioning the person who is playing the song (like !song @MusicBot)
+- To recognize music from a voice channel, send `!song @mention` or /song-vc slash command, mentioning the person who is playing the song (like !song @MusicBot)
 - If you want the bot to listen to a channel so it can immediately recognize the song from the last 15 second of audio, type !listen or use the /listen slash command.
 
 ## How to use it with the streams

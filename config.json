@@ -5,7 +5,7 @@
   "SecretCallbackToken": "",
   "CallbacksAddr": "127.0.0.1:4541",
   "Triggers": [
-    "whats the song", "whats this song", "!song", "!recognize", "!audd",
+    "whats the song", "whats this song", "!song", "!recognize", "!audd"
   ],
   "AntiTriggers": [
     "whats the song about"
