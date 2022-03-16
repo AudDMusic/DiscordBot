@@ -11,7 +11,7 @@ A music recognition bot for Discord. Uses the [Music Recognition API](https://au
 - Create an application here: https://discordapp.com/developers/applications
 - Copy the secret to the DiscordToken in config.json and the Client ID to DiscordAppID in *config.json*
 - Create a bot
-- Build and run the discordBot (e.g. `go build && ./discordBot`) or download recent compiled build from [GitHub Action](https://github.com/AudDMusic/DiscordBot/actions/workflows/go.yml)
+- Build the binary (e.g. `go build -v ./...`) or download [one compiled by GitHub](https://github.com/AudDMusic/DiscordBot/actions/workflows/go.yml) and run it (e.g., `./discordBot`)
 - Open `https://discordapp.com/api/oauth2/authorize?client_id=<INSERT CLIENT ID HERE>&permissions=277026819136&scope=bot%20applications.commands` and add the bot to a server
 
 ## How to use it
