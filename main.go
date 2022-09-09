@@ -51,15 +51,17 @@ const enterpriseChunkLength = 12
 
 //ToDo: make a good help message
 var help = "👋 Hi! I'm a music recognition bot. I'm still in testing and might restart from time to time. Please report any bugs if you experience them.\n\n" +
-	"If you see an audio or a video and want to know what's the music, you can reply to it with !song, and the " +
+	"If you see an audio or a video and want to know what's the music, " +
+	"you can reply to it with \"!song\", and the " +
 	"bot will identify the music (the commands are subject to change). Or make a right click on the message and pick Apps " +
 	"-> Recognize This Song.\n\n" +
-	"When you're on a voice channel and someone is playing music there, type \"!song [mention]\"," +
+	"When you're on a voice channel and someone is playing music there, type the slash /song-vc [mention] command," +
 	" mentioning the user playing the music. The bot will record the sound for 12 seconds and then attempt to " +
-	"identify the song. (The same as slash /song-vc command.)\n\n" +
-	"On a voice channel, you can also use the !listen command, so the bot joins, listens, and keeps the last 12 seconds " +
-	"of audio in it's memory, and when you type !song [mention], it will immediately identify music from the last 12 " +
-	"seconds. (The same as the slash /listen command.) If you send !disconnect, the bot will leave the VC. (The same as the /disconnect command.)"
+	"identify the song.\n\n" +
+	"On a voice channel, you can also use the !listen or the slash /listen command, and the bot will join the VC, listen, and keep the last 12 seconds " +
+	"of audio in it's memory, and when you type /song-vc [mention], it will immediately identify music from the last 12 " +
+	"seconds. If you send /disconnect, the bot will leave the VC.\n\n" +
+	"Source code: https://github.com/AudDMusic/DiscordBot. Privacy policy: https://audd.io/privacy."
 
 // ToDo: move from converting to PCM and stacking to directly recording OPUS? E.g., something like https://github.com/bwmarrin/dca or https://github.com/jonas747/dca
 
@@ -149,9 +151,9 @@ func (c *BotConfig) guildCreate(s *discordgo.Session, event *discordgo.GuildCrea
 	}
 	fmt.Println("Guild: ", event.Guild.Name)
 
-	for _, channel := range event.Guild.Channels {
+	/*for _, channel := range event.Guild.Channels {
 		fmt.Println(channel.Name, channel.ID, channel.GuildID)
-	}
+	}*/
 	if event.Guild.JoinedAt.Before(time.Now().Add(-2 * time.Minute)) {
 		return
 	}
@@ -392,6 +394,11 @@ var ApplicationCommands = []*discordgo.ApplicationCommand{
 	},
 	{
 		Type:        discordgo.ChatApplicationCommand,
+		Name:        "help",
+		Description: "Display the help message",
+	},
+	{
+		Type:        discordgo.ChatApplicationCommand,
 		Name:        "listen",
 		Description: "Join the voice channel and wait for /song-vc, then immediately identify music from last 12 seconds",
 	},
@@ -491,6 +498,21 @@ var commandHandlers = map[string]func(c *BotConfig, s *discordgo.Session, i *dis
 		})
 		capture(err)
 	},
+	"help": func(c *BotConfig, s *discordgo.Session, i *discordgo.InteractionCreate) {
+		if i.Member == nil {
+			return
+		}
+		if i.Member.User == nil {
+			return
+		}
+		message := help
+		capture(s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+			Type: discordgo.InteractionResponseChannelMessageWithSource,
+			Data: &discordgo.InteractionResponseData{
+				Content: message,
+			},
+		}))
+	},
 	"listen": func(c *BotConfig, s *discordgo.Session, i *discordgo.InteractionCreate) {
 		if i.Member == nil {
 			return
@@ -550,10 +572,10 @@ func (c *BotConfig) messageCreate(s *discordgo.Session, m *discordgo.MessageCrea
 	}
 	if strings.HasPrefix(m.Content, "!here") {
 		fmt.Println(m.ChannelID, m.GuildID)
-		_, _ = s.ChannelMessageSendReply(m.ChannelID, "[test](https://example.com) Guild ID: "+m.GuildID+", Channel ID: "+m.ChannelID, m.Reference())
+		_, _ = s.ChannelMessageSendReply(m.ChannelID, "Guild ID: "+m.GuildID+", Channel ID: "+m.ChannelID, m.Reference())
 		return
 	}
-	if m.Content == "!help" {
+	if strings.HasPrefix(m.Content, "!help") {
 		_, _ = s.ChannelMessageSendReply(m.ChannelID, help, m.Reference())
 		return
 	}
@@ -616,7 +638,7 @@ func (c *BotConfig) SongVCCommand(s *discordgo.Session,
 		}
 		if userToListenToID == "" {
 			reply := &discordgo.MessageSend{
-				Content: "Please mention the user playing the music in a voice channel (like !song @musicbot) or " +
+				Content: "Please mention the user playing the music in a voice channel (like /song-vc @musicbot) or " +
 					"reply with !song to a message with an audio file or a link to the audio file and I'll identify the music",
 			}
 			if reference != nil {
@@ -709,7 +731,7 @@ var UsersInvitedBot = map[string]GuildChPair{}
 func (c *BotConfig) ListenCommand(s *discordgo.Session, guildID, userID string) string {
 	if c.BotInvitedToVC(s, guildID, userID) {
 		return "Listening!\n" +
-			"Type !song with a mention to recognize a song played by someone mentioned."
+			"Type /song-vc with a mention to recognize a song played by someone mentioned."
 	}
 	return ""
 }
