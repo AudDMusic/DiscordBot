@@ -14,6 +14,8 @@ A music recognition bot for Discord. Uses the [Music Recognition API](https://au
 - Build the binary (e.g. `go build -v ./...`) or download [one compiled by GitHub](https://github.com/AudDMusic/DiscordBot/actions/workflows/go.yml) and run it (e.g., `./discordBot`)
 - Open `https://discordapp.com/api/oauth2/authorize?client_id=<INSERT CLIENT ID HERE>&permissions=277026819136&scope=bot%20applications.commands` and add the bot to a server
 
+**Please note that to be able to identify music from messages you replied with "!song" to, the bot needs access to the privelleged Message Content intent.**
+
 ## How to use it
 - To identify a song from an audio/video file or a link, reply to it with !song or or right-click on the message and pick App -> Recognize This Song
 - To recognize music from a voice channel, send `!song @mention` or /song-vc slash command, mentioning the person who is playing the song (like !song @MusicBot)
