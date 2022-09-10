@@ -50,18 +50,19 @@ var AudDClient *audd.Client
 const enterpriseChunkLength = 12
 
 //ToDo: make a good help message
-var help = "👋 Hi! I'm a music recognition bot. I'm still in testing and might restart from time to time. Please report any bugs if you experience them.\n\n" +
-	"If you see an audio or a video and want to know what's the music, " +
-	"you can reply to it with \"!song\", and the " +
-	"bot will identify the music (the commands are subject to change). Or make a right click on the message and pick Apps " +
-	"-> Recognize This Song.\n\n" +
-	"When you're on a voice channel and someone is playing music there, type the slash /song-vc [mention] command," +
-	" mentioning the user playing the music. The bot will record the sound for 12 seconds and then attempt to " +
+var help = "👋 Hi! I'm a music recognition bot.\n\n" +
+	"If you see an audio or a video and want to know what's the music, you can reply to it with **!song**, and the " +
+	"bot will identify the music. Or make a right click on the message and pick Apps -> Recognize This Song.\n\n" +
+	"When you're on a voice channel and someone is playing music there, type the slash **/song-vc [mention]** command, " +
+	"mentioning the user playing the music (**!song [mention]** also works). The bot will record the sound for 12 seconds and then attempt to " +
 	"identify the song.\n\n" +
-	"On a voice channel, you can also use the !listen or the slash /listen command, and the bot will join the VC, listen, and keep the last 12 seconds " +
-	"of audio in it's memory, and when you type /song-vc [mention], it will immediately identify music from the last 12 " +
-	"seconds. If you send /disconnect, the bot will leave the VC.\n\n" +
-	"Source code: https://github.com/AudDMusic/DiscordBot. Privacy policy: https://audd.io/privacy."
+	"On a voice channel, you can also use the slash **/listen** command (or **!listen**), and the bot will join the VC, " +
+	"listen, and keep the last 12 seconds " +
+	"of audio in it's memory, and when you type **/song-vc [mention]** (or **!song [mention]**), it will immediately identify music from the last 12 " +
+	"seconds of what the mentioned user or bot has played on the voice channel. If you send **/disconnect**, the bot will leave the VC.\n\n" +
+	"Source code: https://github.com/AudDMusic/DiscordBot. Privacy policy: https://audd.io/privacy.\n\n" +
+	"**I'm still in testing** and might restart from time to time. The commands are subject to change. " +
+	"Please report any bugs if you experience them. Support server: https://discord.gg/audd"
 
 // ToDo: move from converting to PCM and stacking to directly recording OPUS? E.g., something like https://github.com/bwmarrin/dca or https://github.com/jonas747/dca
 
@@ -226,7 +227,7 @@ func GetButtons(includeDonate bool) []discordgo.MessageComponent {
 	if includeDonate {
 		buttonsRow.Components = append(buttonsRow.Components, discordgo.Button{
 			Label: "Donate", Style: discordgo.LinkButton,
-			URL: "https://www.reddit.com/r/AudD/comments/nua48w/please_consider_donating_and_making_the_bot_happy/",
+			URL: "https://github.com/AudDMusic/DiscordBot/wiki/Please-consider-donating",
 		})
 	}
 	return []discordgo.MessageComponent{buttonsRow}
