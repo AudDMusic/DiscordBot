@@ -116,6 +116,10 @@ func main() {
 		if capture(err) {
 			panic(err)
 		}
+		time.Sleep(time.Second * 15)
+		serverStatsMu.RLock()
+		fmt.Println("Opened Discord session. Total servers:", len(serverStatsList))
+		serverStatsMu.RUnlock()
 	}()
 	http.HandleFunc("/", cfg.HandleCallback)
 	err = http.ListenAndServe(cfg.CallbacksAddr, nil)
@@ -146,15 +150,36 @@ func (c *BotConfig) HandleCallback(_ http.ResponseWriter, r *http.Request) {
 	c.sendResult(r.URL.Query().Get("chat_id"), message, false)
 }
 
+type serverStats struct {
+	ServerName string
+	TotalUsers int
+}
+
+var serverStatsList = make([]serverStats, 0)
+var serverStatsMu = &sync.RWMutex{}
+
 func (c *BotConfig) guildCreate(s *discordgo.Session, event *discordgo.GuildCreate) {
 	if event.Guild.Unavailable {
 		return
 	}
-	fmt.Println("Guild: ", event.Guild.Name)
-
-	/*for _, channel := range event.Guild.Channels {
-		fmt.Println(channel.Name, channel.ID, channel.GuildID)
-	}*/
+	serverStatsMu.Lock()
+	serverStatsList = append(serverStatsList, serverStats{
+		ServerName: event.Guild.Name,
+		TotalUsers: event.Guild.MemberCount,
+	})
+	serverStatsMu.Unlock()
+	go func() {
+		/*if event.Guild.MemberCount > 1000 {
+			time.Sleep(time.Second * 10)
+		}
+		if event.Guild.MemberCount > 100 {
+			time.Sleep(time.Second * 5)
+		}*/
+		fmt.Println("Guild: ", event.Guild.Name, event.Guild.MemberCount)
+		/*for _, channel := range event.Guild.Channels {
+			fmt.Println(channel.Name, channel.ID, channel.GuildID)
+		}*/
+	}()
 	if event.Guild.JoinedAt.Before(time.Now().Add(-2 * time.Minute)) {
 		return
 	}
@@ -576,7 +601,18 @@ func (c *BotConfig) messageCreate(s *discordgo.Session, m *discordgo.MessageCrea
 		_, _ = s.ChannelMessageSendReply(m.ChannelID, "Guild ID: "+m.GuildID+", Channel ID: "+m.ChannelID, m.Reference())
 		return
 	}
-	if strings.HasPrefix(m.Content, "!help") {
+	if strings.HasPrefix(m.Content, "!total-servers") {
+		totalMembers := 0
+		serverStatsMu.RLock()
+		for _, stats := range serverStatsList {
+			totalMembers += stats.TotalUsers
+		}
+		message := fmt.Sprintf("I'm on %d servers with %d members", len(serverStatsList), totalMembers)
+		serverStatsMu.RUnlock()
+		_, _ = s.ChannelMessageSendReply(m.ChannelID, message, m.Reference())
+		return
+	}
+	if m.Content == "!help" {
 		_, _ = s.ChannelMessageSendReply(m.ChannelID, help, m.Reference())
 		return
 	}
@@ -639,7 +675,7 @@ func (c *BotConfig) SongVCCommand(s *discordgo.Session,
 		}
 		if userToListenToID == "" {
 			reply := &discordgo.MessageSend{
-				Content: "Please mention the user playing the music in a voice channel (like /song-vc @musicbot) or " +
+				Content: "Please mention the user playing the music in a voice channel (like !song @musicbot) or " +
 					"reply with !song to a message with an audio file or a link to the audio file and I'll identify the music",
 			}
 			if reference != nil {
@@ -732,7 +768,7 @@ var UsersInvitedBot = map[string]GuildChPair{}
 func (c *BotConfig) ListenCommand(s *discordgo.Session, guildID, userID string) string {
 	if c.BotInvitedToVC(s, guildID, userID) {
 		return "Listening!\n" +
-			"Type /song-vc with a mention to recognize a song played by someone mentioned."
+			"Type !song with a mention to recognize a song played by someone mentioned."
 	}
 	return ""
 }
