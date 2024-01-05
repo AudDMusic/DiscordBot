@@ -20,7 +20,7 @@ import (
 	"time"
 )
 
-const release = "discord-bot@0.0.3"
+const release = "discord-bot@0.0.4"
 
 const configFile = "config.json"
 
@@ -245,13 +245,13 @@ func (c *BotConfig) GetLinkFromMessage(s *discordgo.Session, m *discordgo.Messag
 
 func GetButtons(includeDonate bool) []discordgo.MessageComponent {
 	buttonsRow := &discordgo.ActionsRow{Components: []discordgo.MessageComponent{discordgo.Button{
-		Label: "GitHub", Style: discordgo.LinkButton, URL: "https://github.com/AudDMusic/DiscordBot",
+		Label: "GitHub", Emoji: discordgo.ComponentEmoji{ Name: "📝", }, Style: discordgo.LinkButton, URL: "https://github.com/AudDMusic/DiscordBot",
 	}, discordgo.Button{
-		Label: "Report bug", Style: discordgo.LinkButton, URL: "https://github.com/AudDMusic/DiscordBot/issues/new",
+		Label: "Report bug", Style: discordgo.LinkButton, Emoji: discordgo.ComponentEmoji{ Name: "🪲", }, URL: "https://github.com/AudDMusic/DiscordBot/issues/new",
 	}}}
 	if includeDonate {
 		buttonsRow.Components = append(buttonsRow.Components, discordgo.Button{
-			Label: "Donate", Style: discordgo.LinkButton,
+			Label: "Donate", Style: discordgo.LinkButton, Emoji: discordgo.ComponentEmoji{ Name: "💸", },
 			URL: "https://github.com/AudDMusic/DiscordBot/wiki/Please-consider-donating",
 		})
 	}
