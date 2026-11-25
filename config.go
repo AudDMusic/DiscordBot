@@ -61,6 +61,9 @@ type BotConfig struct {
 	// ResultCacheMinutes is how long a result for the same link is reused. Negative disables the cache.
 	ResultCacheMinutes int `json:"ResultCacheMinutes"`
 
+	// OptOutFile is where the IDs of the users who opted out with /privacy are kept.
+	OptOutFile string `json:"OptOutFile"`
+
 	BlockedUserIDs  []string `json:"BlockedUserIDs"`
 	BlockedGuildIDs []string `json:"BlockedGuildIDs"`
 }
@@ -110,6 +113,9 @@ func (c *BotConfig) applyDefaults() {
 	def(&c.VoiceIdleMinutes, 60)
 	def(&c.MaxVoiceSessions, 25)
 	def(&c.ResultCacheMinutes, 10)
+	if c.OptOutFile == "" {
+		c.OptOutFile = "optouts.json"
+	}
 	if c.RateLimits.MaxConcurrent < 1 {
 		c.RateLimits.MaxConcurrent = 1024
 	}

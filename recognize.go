@@ -113,6 +113,9 @@ func linksFromMessage(m *discordgo.Message) []string {
 func (b *Bot) findMediaURL(s *discordgo.Session, m *discordgo.Message) (string, error) {
 	current := m
 	for depth := 0; current != nil; depth++ {
+		if current.Author != nil && b.optOuts.Has(current.Author.ID) {
+			return "", errOptedOut
+		}
 		if links := linksFromMessage(current); len(links) > 0 {
 			return links[0], nil
 		}

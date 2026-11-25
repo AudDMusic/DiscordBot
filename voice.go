@@ -116,6 +116,7 @@ type voiceSession struct {
 	vc                 *discordgo.VoiceConnection
 	done               chan struct{}
 	closeOnce          sync.Once
+	skipUser           func(userID string) bool
 
 	mu       sync.Mutex
 	ssrcUser map[uint32]string
@@ -154,6 +155,10 @@ func (vs *voiceSession) handlePacket(p *discordgo.Packet) {
 	vs.mu.Lock()
 	defer vs.mu.Unlock()
 	now := time.Now()
+	if userID, known := vs.ssrcUser[p.SSRC]; known && vs.skipUser != nil && vs.skipUser(userID) {
+		delete(vs.streams, p.SSRC) // this user has opted out: keep nothing
+		return
+	}
 	st := vs.streams[p.SSRC]
 	if st == nil {
 		if len(vs.streams) >= maxStreamsPerSession {
@@ -194,7 +199,7 @@ func (vs *voiceSession) audioOf(userID string) (samples []int16, packets int) {
 			}
 		}
 	}
-	if samples == nil && len(vs.streams) == 1 {
+	if samples == nil && len(vs.streams) == 1 && vs.skipUser == nil {
 		// Only one participant is making any sound and Discord hasn't told us who that is.
 		for ssrc, st := range vs.streams {
 			if _, known := vs.ssrcUser[ssrc]; !known {
@@ -260,6 +265,8 @@ type lastListened struct {
 type voiceManager struct {
 	maxSessions int
 	idleTimeout time.Duration
+	// skipUser tells whose audio must not be kept (the users who opted out).
+	skipUser func(userID string) bool
 
 	mu           sync.Mutex
 	sessions     map[string]*voiceSession // by guild ID
@@ -323,7 +330,7 @@ func (vm *voiceManager) join(s *discordgo.Session, guildID, channelID, invitedBy
 	vs := &voiceSession{
 		guildID: guildID, channelID: channelID, invitedBy: invitedBy, persistent: persistent, vc: vc,
 		done: make(chan struct{}), ssrcUser: map[uint32]string{}, streams: map[uint32]*pcmStream{},
-		lastUsed: time.Now(),
+		lastUsed: time.Now(), skipUser: vm.skipUser,
 	}
 	vc.AddHandler(vs.onSpeaking)
 	var recv chan *discordgo.Packet
@@ -485,6 +492,9 @@ func (b *Bot) SongVCCommand(ctx context.Context, s *discordgo.Session, userID, u
 	}
 	if userToListenToID == "" {
 		return true, textMessage(replyMentionSpeaker, reference)
+	}
+	if b.optOuts.Has(userToListenToID) {
+		return true, textMessage("That user has asked me not to listen to them", reference)
 	}
 	if userVoiceChannel(s, guildID, userToListenToID) != channelID {
 		return true, textMessage("The user you mentioned isn't in your voice channel", reference)

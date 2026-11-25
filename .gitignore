@@ -10,3 +10,4 @@ config.*.json
 *.exe
 *.pcm
 *.wav
+optouts.json

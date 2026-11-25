@@ -30,6 +30,7 @@ type Bot struct {
 	flights *flightGroup
 	sem     chan struct{} // bounds the recognitions running at the same time
 	voice   *voiceManager
+	optOuts *optOutStore
 
 	blockedUsers  map[string]bool
 	blockedGuilds map[string]bool
@@ -81,6 +82,11 @@ func main() {
 	defer stop()
 
 	bot := newBot(cfg)
+	// Without the opt-out list the bot could process the messages of the people who opted out: don't start.
+	if bot.optOuts, err = loadOptOuts(cfg.OptOutFile); err != nil {
+		log.Fatalln("Can't load the opt-out list:", err)
+	}
+	bot.voice.skipUser = bot.optOuts.Has
 	if err := bot.openSessions(ctx); err != nil {
 		capture(err)
 		sentry.Flush(5 * time.Second)

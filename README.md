@@ -26,6 +26,7 @@ and text triggers work in DMs and in the messages that mention the bot.
 - To identify a song from an audio/video file or a link, reply to it with `!song` or right-click on the message and pick Apps -> Recognize This Song.
 - Add a time to listen to a specific part: `!song 1:25`, `!song 1:25-2:10`, or `!song at the end`.
 - `!help` or `/help` shows the help message.
+- `/privacy` lets anyone opt out of the bot processing their messages and voice, opt back in, or see the [privacy policy](https://audd.io/privacy/discord-bot/). See [PRIVACY.md](PRIVACY.md).
 
 ### Voice channels
 - To recognize music from a voice channel, send `!song @mention` or use the `/song-vc` slash command, mentioning the person who is playing the song (like `!song @MusicBot`).
@@ -49,6 +50,7 @@ are in `config.example.json`:
 | `ResultCacheMinutes` | 10 | How long the result for the same link is reused instead of asking the API again |
 | `MaxVoiceSessions` | 25 | Voice channels the bot can be in at once |
 | `BlockedUserIDs`, `BlockedGuildIDs` | empty | Users and servers the bot ignores |
+| `OptOutFile` | `optouts.json` | Where the IDs of the users who opted out with `/privacy` are kept. The bot needs to be able to write to its folder |
 | `MaxTriggerTextLength` | 0 (off) | Ignore the messages longer than this |
 
 A value of `0` means "use the default", and a negative value turns that limit off. A user who goes over a limit

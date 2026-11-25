@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"strings"
@@ -34,8 +35,8 @@ func (b *Bot) onMessageCreate(s *discordgo.Session, m *discordgo.MessageCreate) 
 	if m.Author.Bot || m.WebhookID != "" || m.Author.ID == s.State.User.ID {
 		return
 	}
-	if b.isBlocked(m.Author.ID, m.GuildID) {
-		return
+	if b.isBlocked(m.Author.ID, m.GuildID) || b.optOuts.Has(m.Author.ID) {
+		return // opted-out users' messages are dropped before anything looks at their text
 	}
 	command := strings.ToLower(strings.TrimSpace(m.Content))
 	isCommand := func(name string) bool {
@@ -100,6 +101,12 @@ func (b *Bot) handleTrigger(s *discordgo.Session, m *discordgo.Message, compare,
 	canCompress := b.cfg.CanCompressWithoutSlash
 
 	mediaURL, err := b.findMediaURL(s, m) // Try to find a video or an audio and react to it
+	if errors.Is(err, errOptedOut) {
+		if isShort {
+			b.reply(m.ChannelID, textMessage(replyAuthorOptedOut, m.Reference()))
+		}
+		return
+	}
 	if err != nil {
 		log.Println("can't get a referenced message:", err)
 		if isShort {

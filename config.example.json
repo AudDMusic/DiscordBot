@@ -29,6 +29,7 @@
     "MaxConcurrent": 8
   },
   "ResultCacheMinutes": 10,
+  "OptOutFile": "optouts.json",
   "BlockedUserIDs": [],
   "BlockedGuildIDs": []
 }

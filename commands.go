@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"log"
 	"strings"
 	"time"
@@ -22,7 +24,8 @@ const helpVoice = "When you're on a voice channel and someone is playing music t
 	"of audio in its memory, and when you type **/song-vc [mention]** (or **!song [mention]**), it will immediately identify music from the last 12 " +
 	"seconds of what the mentioned user or bot has played on the voice channel. If you send **/disconnect**, the bot will leave the VC.\n\n"
 
-const helpOutro = "Source code: <https://github.com/AudDMusic/DiscordBot>. Privacy policy: <https://audd.io/privacy>.\n\n" +
+const helpOutro = "If you don't want me to read your messages, use **/privacy opt-out**. " +
+	"Privacy policy: <" + privacyPolicyURL + ">. Source code: <https://github.com/AudDMusic/DiscordBot>.\n\n" +
 	"Please report any bugs if you experience them. Support server: https://discord.gg/audd"
 
 func (b *Bot) helpText() string {
@@ -43,6 +46,22 @@ func (b *Bot) applicationCommands() []*discordgo.ApplicationCommand {
 			Type:        discordgo.ChatApplicationCommand,
 			Name:        "help",
 			Description: "Display the help message",
+		},
+		{
+			Type:        discordgo.ChatApplicationCommand,
+			Name:        "privacy",
+			Description: "Choose whether the bot may process your messages and voice, or see the privacy policy",
+			Options: []*discordgo.ApplicationCommandOption{{
+				Type:        discordgo.ApplicationCommandOptionString,
+				Name:        "action",
+				Description: "What to do",
+				Required:    true,
+				Choices: []*discordgo.ApplicationCommandOptionChoice{
+					{Name: "opt-out: don't process my messages and voice", Value: "opt-out"},
+					{Name: "opt-in: undo the opt-out", Value: "opt-in"},
+					{Name: "status: show my current setting and the privacy policy", Value: "status"},
+				},
+			}},
 		},
 		{
 			Type: discordgo.MessageApplicationCommand,
@@ -150,6 +169,8 @@ func (b *Bot) onInteractionCreate(s *discordgo.Session, i *discordgo.Interaction
 	switch data.Name {
 	case "help":
 		respond(s, i, b.helpText(), true)
+	case "privacy":
+		b.privacyCommand(s, i, user, data)
 	case "Recognize This Song":
 		b.recognizeMessageCommand(s, i, user, data)
 	case "song-vc":
@@ -196,6 +217,10 @@ func (b *Bot) recognizeMessageCommand(s *discordgo.Session, i *discordgo.Interac
 		respond(s, i, "Sorry, I couldn't get this message", true)
 		return
 	}
+	if m.Author != nil && b.optOuts.Has(m.Author.ID) {
+		respond(s, i, replyAuthorOptedOut, true)
+		return
+	}
 	if len(linksFromMessage(m)) == 0 && (m.MessageReference == nil || b.cfg.MaxReplyDepth == 0) {
 		respond(s, i, "Sorry, I couldn't get any audio from this message", true)
 		return
@@ -208,6 +233,10 @@ func (b *Bot) recognizeMessageCommand(s *discordgo.Session, i *discordgo.Interac
 		return
 	}
 	mediaURL, err := b.findMediaURL(s, m)
+	if errors.Is(err, errOptedOut) {
+		editResponse(s, i, textMessage(replyAuthorOptedOut, nil))
+		return
+	}
 	if err != nil || mediaURL == "" || isOwnLink(mediaURL) {
 		editResponse(s, i, textMessage("Sorry, I couldn't get any audio from this message", nil))
 		return
@@ -242,4 +271,38 @@ func (b *Bot) songVCSlashCommand(s *discordgo.Session, i *discordgo.InteractionC
 		message = textMessage("Sorry, you can't use this command", nil)
 	}
 	editResponse(s, i, message)
+}
+
+// privacyCommand lets people opt out of (and back into) the bot processing their messages and voice.
+func (b *Bot) privacyCommand(s *discordgo.Session, i *discordgo.InteractionCreate, user *discordgo.User,
+	data discordgo.ApplicationCommandInteractionData) {
+	action := ""
+	if option := data.GetOption("action"); option != nil {
+		action, _ = option.Value.(string)
+	}
+	if !b.limiter.Allow("privacy:"+user.ID, 10, time.Minute) {
+		respond(s, i, replyUserLimited, true)
+		return
+	}
+	policy := "\n\nPrivacy policy: <" + privacyPolicyURL + ">"
+	switch action {
+	case "opt-out", "opt-in":
+		optOut := action == "opt-out"
+		if err := b.optOuts.Set(user.ID, optOut); err != nil {
+			capture(fmt.Errorf("can't save the opt-out list: %w", err))
+			respond(s, i, "Sorry, I couldn't save your choice. Please try again later or write to privacy@audd.io.", true)
+			return
+		}
+		if optOut {
+			respond(s, i, replyOptedOut+policy, true)
+		} else {
+			respond(s, i, replyOptedIn+policy, true)
+		}
+	default:
+		status := "You haven't opted out: I check the messages I can see for requests like !song and forget everything else right away."
+		if b.optOuts.Has(user.ID) {
+			status = "You've opted out: I don't read your messages or listen to you in voice channels."
+		}
+		respond(s, i, status+policy, true)
+	}
 }

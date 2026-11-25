@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -600,10 +601,10 @@ func TestCommands(t *testing.T) {
 		}
 		return strings.Join(list, ",")
 	}
-	if got := names(false); got != "help,Recognize This Song" {
+	if got := names(false); got != "help,privacy,Recognize This Song" {
 		t.Errorf("commands without voice: %s", got)
 	}
-	if got := names(true); got != "help,Recognize This Song,song-vc,listen,disconnect" {
+	if got := names(true); got != "help,privacy,Recognize This Song,song-vc,listen,disconnect" {
 		t.Errorf("commands with voice: %s", got)
 	}
 }
@@ -622,4 +623,67 @@ func TestLiveRecognition(t *testing.T) {
 		t.Fatalf("no songs were recognized: %q", message.Content)
 	}
 	t.Logf("recognized %q (%s)", message.Embeds[0].Title, message.Embeds[0].Description)
+}
+
+func TestOptOut(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "optouts.json")
+	store, err := loadOptOuts(path)
+	if err != nil || store.Has("1") {
+		t.Fatalf("a new store: %v", err)
+	}
+	if err := store.Set("111111111111111111", true); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Set("222222222222222222", true); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Set("222222222222222222", false); err != nil {
+		t.Fatal(err)
+	}
+	reloaded, err := loadOptOuts(path) // the choice survives a restart
+	if err != nil || !reloaded.Has("111111111111111111") || reloaded.Has("222222222222222222") {
+		t.Fatalf("the reloaded store is wrong: %v", err)
+	}
+	if raw, _ := os.ReadFile(path); string(raw) != `["111111111111111111"]` {
+		t.Errorf("the file has more than the IDs: %s", raw)
+	}
+	if info, _ := os.Stat(path); info.Mode().Perm() != 0o600 {
+		t.Errorf("the file is readable by others: %v", info.Mode())
+	}
+	if (*optOutStore)(nil).Has("1") {
+		t.Error("a missing store must not report anyone")
+	}
+	// A list that can't be read must stop the bot from starting instead of being treated as empty.
+	if err := os.WriteFile(path, []byte("{broken"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := loadOptOuts(path); err == nil {
+		t.Error("a broken opt-out list was accepted")
+	}
+
+	// Nobody can make the bot process a message of someone who opted out.
+	bot := &Bot{cfg: &BotConfig{MaxReplyDepth: 3}, optOuts: reloaded}
+	theirs := &discordgo.Message{
+		Author:      &discordgo.User{ID: "111111111111111111"},
+		Attachments: []*discordgo.MessageAttachment{{URL: "https://cdn.discordapp.com/attachments/1/2/clip.mp4", ContentType: "video/mp4"}},
+	}
+	request := &discordgo.Message{
+		Author: &discordgo.User{ID: "333333333333333333"}, Content: "!song",
+		MessageReference: &discordgo.MessageReference{MessageID: "1"}, ReferencedMessage: theirs,
+	}
+	if link, err := bot.findMediaURL(nil, request); !errors.Is(err, errOptedOut) || link != "" {
+		t.Errorf("a message of an opted-out user was processed: %q, %v", link, err)
+	}
+	theirs.Author.ID = "222222222222222222" // opted back in
+	if link, err := bot.findMediaURL(nil, request); err != nil || link == "" {
+		t.Errorf("a message of a user who opted back in wasn't processed: %v", err)
+	}
+
+	// The audio of someone who opted out isn't kept in a voice session.
+	vs := &voiceSession{done: make(chan struct{}), ssrcUser: map[uint32]string{5: "111111111111111111"},
+		streams: map[uint32]*pcmStream{5: {}}, skipUser: reloaded.Has}
+	vs.handlePacket(&discordgo.Packet{SSRC: 5, Opus: []byte{0xf8, 0xff, 0xfe}})
+	if len(vs.streams) != 0 {
+		t.Error("audio of an opted-out user was kept")
+	}
 }
