@@ -15,5 +15,20 @@
   "UncompressedLimit": 2,
   "CompressStartingWith": 0,
   "CanCompressWithoutSlash": false,
-  "SentryDSN": ""
+  "SentryDSN": "",
+  "VoiceEnabled": false,
+  "VoiceIdleMinutes": 60,
+  "MaxVoiceSessions": 25,
+  "DisableMessageContentIntent": false,
+  "ShardCount": 0,
+  "RateLimits": {
+    "UserPerMinute": 5,
+    "UserPerDay": 150,
+    "GuildPerMinute": 20,
+    "GuildPerDay": 2000,
+    "MaxConcurrent": 8
+  },
+  "ResultCacheMinutes": 10,
+  "BlockedUserIDs": [],
+  "BlockedGuildIDs": []
 }

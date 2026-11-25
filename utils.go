@@ -1,19 +1,32 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"fmt"
-	"github.com/Mihonarium/discordgo"
-	"github.com/getsentry/sentry-go"
+	"log"
+	"net"
 	"net/url"
-	"reflect"
-	"runtime"
+	"runtime/debug"
 	"strconv"
 	"strings"
+	"time"
+	"unicode/utf8"
+
+	"github.com/getsentry/sentry-go"
 )
 
-func getBodyToCompare(body string) string {
-	return "\n" + strings.ReplaceAll(strings.ToLower(replaceSlice(body, "", "'", "’", "`")), "what is", "whats") + "?"
+// maxSkipSeconds bounds the timestamps people can ask for (24 hours).
+const maxSkipSeconds = 24 * 60 * 60
+
+func normalizeTrigger(s string) string {
+	return strings.ToLower(replaceSlice(s, "", "'", "’", "`"))
 }
+
+func getBodyToCompare(body string) string {
+	return "\n" + strings.ReplaceAll(normalizeTrigger(body), "what is", "whats") + "?"
+}
+
 func replaceSlice(s, replaceWith string, oldStrings ...string) string {
 	for _, old := range oldStrings {
 		s = strings.ReplaceAll(s, old, replaceWith)
@@ -21,38 +34,17 @@ func replaceSlice(s, replaceWith string, oldStrings ...string) string {
 	return s
 }
 
-func linksFromMessage(m *discordgo.Message) []string {
-	links := make([]string, 0)
-	for _, a := range m.Attachments {
-		if a == nil {
-			continue
-		}
-		if a.URL != "" {
-			links = append(links, a.URL)
-		}
-	}
-	plaintextUrls := rxStrict.FindAllString(m.Content, -1)
-	for i := range plaintextUrls {
-		plaintextUrls[i] = strings.ReplaceAll(plaintextUrls[i], "\\", "")
-		if strings.HasPrefix(plaintextUrls[i], "/") {
-			continue
-		}
-		links = append(links, plaintextUrls[i])
-	}
-	return links
-}
-
+// GetTimeFromText finds a timestamp ("1:23") or an interval ("1:23-2:00", "50-70") in the text.
 func GetTimeFromText(s string) (timeFrom, timeTo int) {
-	s = strings.ReplaceAll(s, " - ", "")
-	words := strings.Split(s, " ")
+	s = strings.ReplaceAll(s, " - ", "-")
 	maxScore := 0
-	for _, w := range words {
+	for _, w := range strings.Fields(s) {
 		score := 0
 		w2 := ""
 		if strings.Contains(w, "-") {
-			w2 = strings.Split(w, "-")[1]
-			w = strings.Split(w, "-")[0]
-			score += 1
+			parts := strings.SplitN(w, "-", 2)
+			w, w2 = parts[0], parts[1]
+			score++
 		}
 		w = strings.TrimSuffix(w, "s")
 		w2 = strings.TrimSuffix(w2, "s")
@@ -68,7 +60,17 @@ func GetTimeFromText(s string) (timeFrom, timeTo int) {
 			}
 		}
 	}
-	return
+	return clampSeconds(timeFrom), clampSeconds(timeTo)
+}
+
+func clampSeconds(t int) int {
+	if t < 0 {
+		return 0
+	}
+	if t > maxSkipSeconds {
+		return maxSkipSeconds
+	}
+	return t
 }
 
 func TimeStringToSeconds(s string) (int, error) {
@@ -82,11 +84,15 @@ func TimeStringToSeconds(s string) (int, error) {
 		if err != nil {
 			return 0, err
 		}
+		if c < 0 || c > maxSkipSeconds {
+			return 0, fmt.Errorf("time is out of range")
+		}
 		seconds += c * multiplier
 		multiplier *= 60
 	}
 	return seconds, nil
 }
+
 func SecondsToTimeString(i int, includeHours bool) string {
 	if includeHours {
 		return fmt.Sprintf("%02d:%02d:%02d", i/3600, (i%3600)/60, i%60)
@@ -94,50 +100,40 @@ func SecondsToTimeString(i int, includeHours bool) string {
 	return fmt.Sprintf("%02d:%02d", i/60, i%60)
 }
 
+// GetSkipFirstFromLink reads the start time from links like ?t=90, ?t=1m30s or ?start=1:30.
 func GetSkipFirstFromLink(link string) int {
-	skip := 0
-	if strings.HasSuffix(link, ".m3u8") {
-		return skip
-	}
 	u, err := url.Parse(link)
-	if err == nil {
-		t := u.Query().Get("t")
-		if t == "" {
-			t = u.Query().Get("time_continue")
-			if t == "" {
-				t = u.Query().Get("start")
-			}
-		}
-		if t != "" {
-			t = strings.ToLower(strings.ReplaceAll(t, "s", ""))
-			tInt := 0
-			if strings.Contains(t, "m") {
-				s := strings.Split(t, "m")
-				tsInt, _ := strconv.Atoi(s[1])
-				tInt += tsInt
-				if strings.Contains(s[0], "h") {
-					s := strings.Split(s[0], "h")
-					if tmInt, err := strconv.Atoi(s[1]); !capture(err) {
-						tInt += tmInt * 60
-					}
-					if thInt, err := strconv.Atoi(s[0]); !capture(err) {
-						tInt += thInt * 60 * 60
-					}
-				} else {
-					if tmInt, err := strconv.Atoi(s[0]); !capture(err) {
-						tInt += tmInt * 60
-					}
-				}
-			} else {
-				if tsInt, err := strconv.Atoi(t); !capture(err) {
-					tInt = tsInt
-				}
-			}
-			skip += tInt
-			fmt.Println("skip:", skip)
+	if err != nil || strings.HasSuffix(u.Path, ".m3u8") {
+		return 0
+	}
+	q := u.Query()
+	t := ""
+	for _, name := range []string{"t", "time_continue", "start"} {
+		if t = strings.ToLower(strings.TrimSpace(q.Get(name))); t != "" {
+			break
 		}
 	}
-	return skip
+	if t == "" || len(t) > 16 {
+		return 0
+	}
+	if seconds, err := strconv.Atoi(strings.TrimSuffix(t, "s")); err == nil {
+		return clampSeconds(seconds)
+	}
+	if strings.Contains(t, ":") {
+		seconds, err := TimeStringToSeconds(t)
+		if err != nil {
+			return 0
+		}
+		return clampSeconds(seconds)
+	}
+	if last := t[len(t)-1]; last >= '0' && last <= '9' {
+		t += "s" // 1m30 -> 1m30s
+	}
+	d, err := time.ParseDuration(t)
+	if err != nil {
+		return 0
+	}
+	return clampSeconds(int(d.Seconds()))
 }
 
 func stringInSlice(slice []string, s string) bool {
@@ -158,69 +154,92 @@ func substringInSlice(s string, slice []string) (exists bool, substring string) 
 	return
 }
 
-func filterFrames(frames []sentry.Frame) []sentry.Frame {
-	if len(frames) == 0 {
-		return nil
+// truncate shortens s to at most max runes.
+func truncate(s string, max int) string {
+	if utf8.RuneCountInString(s) <= max {
+		return s
 	}
-	filteredFrames := make([]sentry.Frame, 0, len(frames))
-	for _, frame := range frames {
-		if frame.Module == "runtime" || frame.Module == "testing" {
-			continue
-		}
-		if frame.Module == "main" && strings.HasPrefix(frame.Function, "capture") {
-			continue
-		}
-		filteredFrames = append(filteredFrames, frame)
+	if max <= 1 {
+		return "…"
 	}
-	return filteredFrames
+	return string([]rune(s)[:max-1]) + "…"
 }
 
+// validateMediaURL makes sure a link from a message is something that's okay
+// to hand over for downloading: a plain http(s) link to a public host.
+func validateMediaURL(raw string) (string, bool) {
+	if len(raw) > 2000 || strings.ContainsAny(raw, " \t\r\n<>`\"") {
+		return "", false
+	}
+	u, err := url.Parse(raw)
+	if err != nil || u.User != nil {
+		return "", false
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return "", false
+	}
+	host := strings.ToLower(strings.TrimSuffix(u.Hostname(), "."))
+	if host == "" || host == "localhost" || !strings.Contains(host, ".") && net.ParseIP(host) == nil {
+		return "", false
+	}
+	for _, suffix := range []string{".localhost", ".local", ".internal", ".lan", ".home", ".corp", ".onion"} {
+		if strings.HasSuffix(host, suffix) {
+			return "", false
+		}
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		if ip.IsLoopback() || ip.IsPrivate() || ip.IsUnspecified() || ip.IsLinkLocalUnicast() ||
+			ip.IsLinkLocalMulticast() || ip.IsMulticast() || ip.IsInterfaceLocalMulticast() {
+			return "", false
+		}
+		if ip4 := ip.To4(); ip4 != nil && (ip4[0] == 0 || ip4[0] == 100 && ip4[1]&0xc0 == 64 || ip4[0] >= 240) {
+			return "", false // "this network", carrier-grade NAT, reserved
+		}
+	}
+	return u.String(), true
+}
+
+// isOwnLink reports whether the link is one of the song pages the bot posts.
+func isOwnLink(link string) bool {
+	u, err := url.Parse(link)
+	return err == nil && strings.EqualFold(u.Hostname(), "lis.tn")
+}
+
+// cacheKeyForURL drops the signature parameters Discord adds to attachment
+// links, so the same file gives the same key every time it's requested.
+func cacheKeyForURL(link string) string {
+	u, err := url.Parse(link)
+	if err != nil {
+		return link
+	}
+	host := strings.ToLower(u.Hostname())
+	if host == "cdn.discordapp.com" || host == "media.discordapp.net" {
+		q := u.Query()
+		q.Del("ex")
+		q.Del("is")
+		q.Del("hm")
+		u.RawQuery = q.Encode()
+	}
+	u.Fragment = ""
+	return u.String()
+}
+
+// capture logs the error, reports it to Sentry and tells whether there was one.
 func capture(err error) bool {
-	extractFrames := func(pcs []uintptr) []sentry.Frame {
-		var frames []sentry.Frame
-		callersFrames := runtime.CallersFrames(pcs)
-		for {
-			callerFrame, more := callersFrames.Next()
-
-			frames = append([]sentry.Frame{
-				sentry.NewFrame(callerFrame),
-			}, frames...)
-
-			if !more {
-				break
-			}
-		}
-		return frames
-	}
-	GetStacktrace := func() *sentry.Stacktrace {
-		pcs := make([]uintptr, 100)
-		n := runtime.Callers(1, pcs)
-		if n == 0 {
-			return nil
-		}
-		frames := extractFrames(pcs[:n])
-		frames = filterFrames(frames)
-		stacktrace := sentry.Stacktrace{
-			Frames: frames,
-		}
-		return &stacktrace
-	}
 	if err == nil {
 		return false
 	}
-	event := sentry.NewEvent()
-	event.Exception = append(event.Exception, sentry.Exception{
-		Value:      err.Error(),
-		Type:       reflect.TypeOf(err).String(),
-		Stacktrace: GetStacktrace(),
-	})
-	event.Level = sentry.LevelError
-	hub := sentry.CurrentHub()
-	client, scope := hub.Client(), hub.Scope()
-	go client.CaptureEvent(event, &sentry.EventHint{OriginalException: err}, scope)
-	go fmt.Println(err.Error())
+	log.Println("error:", err)
+	if !errors.Is(err, context.Canceled) {
+		sentry.CaptureException(err)
+	}
 	return true
 }
-func captureFunc(f func() error) bool {
-	return capture(f())
+
+// recoverPanic keeps a panic in one handler from taking the whole bot down.
+func recoverPanic(where string) {
+	if r := recover(); r != nil {
+		log.Printf("panic in %s: %v\n%s", where, r, debug.Stack())
+		sentry.CurrentHub().Recover(r)
+	}
 }

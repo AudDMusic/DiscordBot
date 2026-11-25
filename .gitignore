@@ -1,0 +1,12 @@
+# The real config has the tokens in it: never commit it. Copy config.example.json instead.
+config.json
+config.*.json
+!config.example.json
+.env
+
+# Build results and recordings
+/discordBot
+/discordBot_*
+*.exe
+*.pcm
+*.wav
