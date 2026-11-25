@@ -687,3 +687,89 @@ func TestOptOut(t *testing.T) {
 		t.Error("audio of an opted-out user was kept")
 	}
 }
+
+func TestVoiceInvite(t *testing.T) {
+	for text, want := range map[string]string{
+		"https://discord.gg/yhKwAvy4N":                     "yhKwAvy4N",
+		"join us: https://discord.com/invite/abc-DEF now":  "abc-DEF",
+		"discord.gg/audd":                                  "audd",
+		"https://www.discordapp.com/invite/K44Pf5maUq?x=1": "K44Pf5maUq",
+		"https://notdiscord.gg/abc":                        "",
+		"https://discord.gg/":                              "",
+		"https://example.com/discord.gg":                   "",
+		"!song":                                            "",
+	} {
+		if got := inviteCode(text); got != want {
+			t.Errorf("inviteCode(%q) = %q; want %q", text, got, want)
+		}
+	}
+
+	// A session with a server the bot is on: user 5 is in voice channel 20.
+	gs, err := discordgo.New("Bot x")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := gs.State.GuildAdd(&discordgo.Guild{ID: "10", VoiceStates: []*discordgo.VoiceState{
+		{GuildID: "10", UserID: "5", ChannelID: "20"}, {GuildID: "10", UserID: "6", ChannelID: "21"},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	bot := &Bot{cfg: &BotConfig{VoiceEnabled: true}}
+	invite := func(guildID, channelID string, channelType discordgo.ChannelType) *discordgo.Invite {
+		return &discordgo.Invite{Guild: &discordgo.Guild{ID: guildID}, Channel: &discordgo.Channel{ID: channelID, Type: channelType}}
+	}
+	voice := discordgo.ChannelTypeGuildVoice
+	for name, tc := range map[string]struct {
+		session *discordgo.Session
+		invite  *discordgo.Invite
+		userID  string
+		want    string // a part of the reply; "" means the bot may join
+	}{
+		"the inviter is in the channel":        {gs, invite("10", "20", voice), "5", ""},
+		"a stage channel":                      {gs, invite("10", "20", discordgo.ChannelTypeGuildStageVoice), "5", ""},
+		"the inviter is in another channel":    {gs, invite("10", "20", voice), "6", "Join that voice channel first"},
+		"the inviter is not in voice":          {gs, invite("10", "20", voice), "7", "Join that voice channel first"},
+		"a text channel":                       {gs, invite("10", "30", discordgo.ChannelTypeGuildText), "5", "can't join a server through an invite link"},
+		"a server the bot is not on":           {gs, invite("11", "20", voice), "5", "not on that server yet"},
+		"the shard is still connecting":        {nil, invite("10", "20", voice), "5", "still starting up"},
+		"an invite without a channel":          {gs, &discordgo.Invite{Guild: &discordgo.Guild{ID: "10"}}, "5", "doesn't work anymore"},
+		"a group DM invite (no server at all)": {gs, &discordgo.Invite{Channel: &discordgo.Channel{ID: "20", Type: voice}}, "5", "doesn't work anymore"},
+	} {
+		got := bot.voiceInviteProblem(tc.session, tc.invite, tc.userID, "999")
+		if tc.want == "" && got != "" || tc.want != "" && !strings.Contains(got, tc.want) {
+			t.Errorf("%s: got %q; want %q", name, got, tc.want)
+		}
+	}
+	if link := addBotLink("999"); !strings.Contains(link, "client_id=999") {
+		t.Errorf("unexpected link to add the bot: %s", link)
+	}
+
+	// Direct messages always arrive on the first shard; the server may be on another one.
+	first, second := &discordgo.Session{ShardCount: 2}, &discordgo.Session{ShardID: 1, ShardCount: 2}
+	bot.sessions = []*discordgo.Session{first, second}
+	if bot.sessionForGuild("731869831183335484") != bot.sessions[(731869831183335484>>22)%2] {
+		t.Error("the wrong shard was picked for a server")
+	}
+	bot.sessions = bot.sessions[:1] // the second shard is still connecting
+	for _, id := range []string{"0", "4194304"} {
+		want := first
+		if id == "4194304" { // (4194304 >> 22) % 2 == 1
+			want = nil
+		}
+		if got := bot.sessionForGuild(id); got != want {
+			t.Errorf("sessionForGuild(%s) = %v; want %v", id, got, want)
+		}
+	}
+	if bot.sessionForGuild("not a number") != nil {
+		t.Error("a session was returned for an incorrect server ID")
+	}
+
+	// The debug log lists which fields of a message are set, without their values.
+	keys := keysWithValue(map[string]json.RawMessage{
+		"content": json.RawMessage(`"secret text"`), "embeds": json.RawMessage(`[]`), "flags": json.RawMessage(`0`),
+		"tts": json.RawMessage(`false`), "nonce": json.RawMessage(`null`), "type": json.RawMessage(`19`),
+	})
+	if strings.Join(keys, " ") != "content type" {
+		t.Errorf("keysWithValue = %v", keys)
+	}
+}

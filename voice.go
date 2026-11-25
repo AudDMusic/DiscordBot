@@ -552,21 +552,31 @@ func (b *Bot) ListenCommand(s *discordgo.Session, guildID, userID string) string
 	if channelID == "" {
 		return "Sorry, I can't find a voice channel you're in"
 	}
+	if joined, problem := b.listen(s, guildID, channelID, userID); !joined {
+		return problem
+	}
+	return "Listening!\nUse **/song-vc** and pick who's playing the music, and I'll identify the song from the last 12 seconds."
+}
+
+// listen makes the bot join the voice channel and stay there, on behalf of the user.
+// When it can't, the text says why.
+func (b *Bot) listen(s *discordgo.Session, guildID, channelID, userID string) (joined bool, problem string) {
 	if !b.limiter.Allow("listen:"+userID, 6, time.Minute) {
-		return replyUserLimited
+		return false, replyUserLimited
 	}
 	_, _, err := b.voice.join(s, guildID, channelID, userID, true)
 	switch {
 	case errors.Is(err, errVoiceBusy):
-		return "Sorry, I'm already listening to another voice channel on this server"
+		return false, "Sorry, I'm already listening to another voice channel on this server"
 	case errors.Is(err, errVoiceCapacity):
-		return "Sorry, I'm in too many voice channels right now. Please try again later."
+		return false, "Sorry, I'm in too many voice channels right now. Please try again later."
 	case err != nil:
 		log.Println("can't join a voice channel:", err)
-		return "Sorry, I couldn't join the voice channel"
+		return false, "Sorry, I couldn't join the voice channel. Please check that I'm allowed to connect to it."
 	}
-	return "Listening!\nType !song with a mention to recognize a song played by someone mentioned."
+	return true, ""
 }
+
 
 // StopListeningCommand makes the bot leave the voice channel if the user is allowed to ask for that.
 func (b *Bot) StopListeningCommand(s *discordgo.Session, guildID, userID string) (left bool, response string) {

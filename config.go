@@ -62,6 +62,10 @@ type BotConfig struct {
 	// ResultCacheMinutes is how long a result for the same link is reused. Negative disables the cache.
 	ResultCacheMinutes int `json:"ResultCacheMinutes"`
 
+	// DebugGatewayEvents logs the gateway events the library doesn't know and the shape (not the
+	// text) of direct messages. It is for finding out what Discord sends for undocumented features.
+	DebugGatewayEvents bool `json:"DebugGatewayEvents"`
+
 	// OptOutFile is where the IDs of the users who opted out with /privacy are kept.
 	OptOutFile string `json:"OptOutFile"`
 

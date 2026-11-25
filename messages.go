@@ -38,6 +38,9 @@ func (b *Bot) onMessageCreate(s *discordgo.Session, m *discordgo.MessageCreate) 
 	if b.isBlocked(m.Author.ID, m.GuildID) || b.optOuts.Has(m.Author.ID) {
 		return // opted-out users' messages are dropped before anything looks at their text
 	}
+	if m.GuildID == "" && b.handleVoiceInvite(s, m.Message) {
+		return
+	}
 	command := strings.ToLower(strings.TrimSpace(m.Content))
 	isCommand := func(name string) bool {
 		return command == name || strings.HasPrefix(command, name+" ")
