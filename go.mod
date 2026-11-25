@@ -4,7 +4,7 @@ go 1.26.0
 
 require (
 	github.com/AudDMusic/audd-go v1.5.22
-	github.com/Mihonarium/discordgo v0.26.2-0.20261125200120-27396edcfea1
+	github.com/Mihonarium/discordgo v0.26.2-0.20261125222629-0fb7ae920375
 	github.com/Mihonarium/go-profanity v0.0.0-20220116125849-662cde2e1ad4
 	github.com/getsentry/sentry-go v0.50.0
 	layeh.com/gopus v0.0.0-20210501142526-1ee02d434e32

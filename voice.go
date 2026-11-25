@@ -272,10 +272,22 @@ func (vs *voiceSession) summary(samples int) string {
 	if vs.vc == nil {
 		return text
 	}
+	text += "; " + receiveSummary(vs.vc.ReceiveStats())
 	if dave, ok := vs.vc.DAVE().(*davesession.Session); ok {
 		state, stats := dave.State(), dave.Stats()
 		text += fmt.Sprintf("; encryption ready=%v epoch=%d protocol=%d, %d frames could not be decrypted",
 			state.Ready, state.EpochID, state.ProtocolVersion, stats.DecryptFailures)
+	}
+	return text
+}
+
+// receiveSummary says where the packets from the voice server ended up.
+func receiveSummary(r discordgo.VoiceReceiveStats) string {
+	text := fmt.Sprintf("received %d packets from the voice server: %d delivered, %d not audio, %d empty, "+
+		"%d failed transport decryption, %d failed end-to-end decryption, %d from streams with no known user; %d speaking updates",
+		r.Packets, r.Delivered, r.NotAudio, r.Empty, r.TransportFailed, r.DAVEFailed, r.UnknownUser, r.SpeakingUpdates)
+	if r.LastDAVEError != "" {
+		text += "; last end-to-end error: " + r.LastDAVEError
 	}
 	return text
 }

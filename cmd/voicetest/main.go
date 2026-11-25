@@ -1,6 +1,9 @@
 // voicetest joins a voice channel with the bot's account, prints how the
 // end-to-end encryption handshake goes and whether received audio decodes.
 // It is a development tool and is not part of the bot.
+//
+// Don't point it at a server where the running bot is in a voice channel: both use the
+// same account, and each would keep taking the voice connection away from the other.
 package main
 
 import (
@@ -26,6 +29,7 @@ func main() {
 	channelID := flag.String("channel", "", "voice channel to join; without it the channels are only listed")
 	seconds := flag.Int("seconds", 20, "how long to stay")
 	shards := flag.Int("shards", 2, "the bot's shard count")
+	daveDebug := flag.Bool("davedebug", false, "print the debug log of the encryption session")
 	flag.Parse()
 
 	raw, err := os.ReadFile(*configPath)
@@ -56,7 +60,11 @@ func main() {
 		dave = x
 		daveMu.Unlock()
 	}))
-	s.DAVELogger = slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
+	daveLevel := slog.LevelInfo
+	if *daveDebug {
+		daveLevel = slog.LevelDebug
+	}
+	s.DAVELogger = slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: daveLevel}))
 
 	guildReady := make(chan *discordgo.Guild, 1)
 	s.AddHandler(func(_ *discordgo.Session, g *discordgo.GuildCreate) {
@@ -153,6 +161,12 @@ func main() {
 			line += fmt.Sprintf("  | ssrc %d user %q: %d packets, %d decoded as Opus, %d not", ssrc, vc.UserIDForSSRC(ssrc), st.packets, st.decoded, st.failed)
 		}
 		mu.Unlock()
+		r := vc.ReceiveStats()
+		line += fmt.Sprintf("  | udp %d: delivered %d, not audio %d, empty %d, transport failed %d, dave failed %d, unknown user %d, speaking updates %d",
+			r.Packets, r.Delivered, r.NotAudio, r.Empty, r.TransportFailed, r.DAVEFailed, r.UnknownUser, r.SpeakingUpdates)
+		if r.LastDAVEError != "" {
+			line += " (" + r.LastDAVEError + ")"
+		}
 		fmt.Println(line)
 	}
 	close(done)

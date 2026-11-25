@@ -1,7 +1,7 @@
 github.com/AudDMusic/audd-go v1.5.22 h1:OWFvSLlQwff4hUEngIpI9LPO/cE4YZHcaNW7pHQJLco=
 github.com/AudDMusic/audd-go v1.5.22/go.mod h1:1uweVvbQsjYnnUwKZu9n7pvqANQ4SMpvMrcjQHz2X0c=
-github.com/Mihonarium/discordgo v0.26.2-0.20261125200120-27396edcfea1 h1:MQXfYJvI9Gh9cjzpLBpF2TJvATuLx0tVNfZxY+v9nzA=
-github.com/Mihonarium/discordgo v0.26.2-0.20261125200120-27396edcfea1/go.mod h1:qFCowZ3+S7Ert0X2GtdsmporNY7OdxzzCOwuDYHYnqU=
+github.com/Mihonarium/discordgo v0.26.2-0.20261125222629-0fb7ae920375 h1:77L159lRpzirTqUOEV5vU09JW3ZTtO8zEOr8eu/tTJI=
+github.com/Mihonarium/discordgo v0.26.2-0.20261125222629-0fb7ae920375/go.mod h1:qFCowZ3+S7Ert0X2GtdsmporNY7OdxzzCOwuDYHYnqU=
 github.com/Mihonarium/go-profanity v0.0.0-20220116125849-662cde2e1ad4 h1:ba4IJQbV0Z/z1fz29NovRTG5zwvvxSQ5fXPSYYSFuZQ=
 github.com/Mihonarium/go-profanity v0.0.0-20220116125849-662cde2e1ad4/go.mod h1:gmQbYS/Epg+w5M5WbbMy3tBBpN84r2wtJRnTY1g8YoI=
 github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc h1:U9qPSI2PIWSS1VwoXQT9A3Wy9MM3WgvqSxFWenqJduM=
