@@ -534,17 +534,38 @@ func TestVoiceBuffer(t *testing.T) {
 	}
 
 	// The audio is attributed through the speaking updates.
-	vs := &voiceSession{done: make(chan struct{}), ssrcUser: map[uint32]string{}, streams: map[uint32]*pcmStream{}}
+	users := map[uint32]string{}
+	vs := &voiceSession{done: make(chan struct{}), streams: map[uint32]*pcmStream{}, userOf: func(ssrc uint32) string { return users[ssrc] }}
 	vs.streams[7] = &pcmStream{}
 	vs.streams[7].write(0, frame(1), time.Now())
 	vs.streams[8] = &pcmStream{}
 	vs.streams[8].write(0, frame(2), time.Now())
-	vs.onSpeaking(nil, &discordgo.VoiceSpeakingUpdate{UserID: "music-bot", SSRC: 8})
+	if samples, _ := vs.audioOf("music-bot"); samples != nil {
+		t.Errorf("audio was attributed to a user before Discord said whose it is")
+	}
+	users[8] = "music-bot"
 	if samples, _ := vs.audioOf("music-bot"); len(samples) != 960 || samples[0] != 2 {
 		t.Errorf("wrong audio for the speaker")
 	}
 	if samples, _ := vs.audioOf("someone-else"); samples != nil {
 		t.Errorf("audio was returned for a user who isn't speaking")
+	}
+	if samples, _ := vs.audioOf(""); samples != nil {
+		t.Errorf("audio of an unidentified stream was returned")
+	}
+	// When the picked user is silent, the bot can say who it does hear.
+	users[7] = "dj"
+	for i := uint32(1); i <= 60; i++ { // 1.2 seconds
+		vs.streams[7].write(i*960, frame(1), time.Now())
+	}
+	if others := vs.otherSpeakers("music-bot"); len(others) != 1 || others[0] != "dj" {
+		t.Errorf("otherSpeakers = %v; want [dj]", others)
+	}
+	if others := vs.otherSpeakers("dj"); len(others) != 0 { // music-bot has only 20 ms buffered
+		t.Errorf("otherSpeakers = %v; want none", others)
+	}
+	if got := vs.summary(0); !strings.HasPrefix(got, "0.0s of audio for the requested speaker") || !strings.Contains(got, "2 speakers identified") {
+		t.Errorf("unexpected capture summary: %s", got)
 	}
 }
 
@@ -680,7 +701,7 @@ func TestOptOut(t *testing.T) {
 	}
 
 	// The audio of someone who opted out isn't kept in a voice session.
-	vs := &voiceSession{done: make(chan struct{}), ssrcUser: map[uint32]string{5: "111111111111111111"},
+	vs := &voiceSession{done: make(chan struct{}), userOf: func(uint32) string { return "111111111111111111" },
 		streams: map[uint32]*pcmStream{5: {}}, skipUser: reloaded.Has}
 	vs.handlePacket(&discordgo.Packet{SSRC: 5, Opus: []byte{0xf8, 0xff, 0xfe}})
 	if len(vs.streams) != 0 {
