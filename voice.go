@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/bwmarrin/discordgo"
+	"github.com/Mihonarium/discordgo"
 	"layeh.com/gopus"
 )
 

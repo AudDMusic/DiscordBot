@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/bwmarrin/discordgo"
+	"github.com/Mihonarium/discordgo"
 )
 
 const helpIntro = "👋 Hi! I'm a music recognition bot.\n\n" +

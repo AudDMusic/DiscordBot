@@ -20,7 +20,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/AudDMusic/audd-go"
-	"github.com/bwmarrin/discordgo"
+	"github.com/Mihonarium/discordgo"
 )
 
 func TestTimeParsing(t *testing.T) {

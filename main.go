@@ -15,11 +15,12 @@ import (
 	"time"
 
 	"github.com/AudDMusic/audd-go"
-	"github.com/bwmarrin/discordgo"
+	"github.com/Mihonarium/discordgo"
 	"github.com/getsentry/sentry-go"
+	davesession "github.com/thomas-vilte/dave-go/session"
 )
 
-const release = "discord-bot@0.1.0"
+const release = "discord-bot@0.2.0"
 
 // exitConfig is the exit status for the problems a restart can't fix (a broken config, a rejected
 // token), so that a service manager can be told not to restart the bot in a loop.
@@ -166,6 +167,8 @@ func (b *Bot) newSession(shardID, shardCount int) (*discordgo.Session, error) {
 	s.AddHandler(b.onInteractionCreate)
 	if b.cfg.VoiceEnabled {
 		s.AddHandler(b.onVoiceStateUpdate)
+		// Discord's voice channels are end-to-end encrypted (DAVE); this is the session that does it.
+		s.DAVESessionCreate = davesession.CreateFunc()
 	}
 	return s, nil
 }
