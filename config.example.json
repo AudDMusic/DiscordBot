@@ -16,7 +16,7 @@
   "CompressStartingWith": 0,
   "CanCompressWithoutSlash": false,
   "SentryDSN": "",
-  "VoiceEnabled": false,
+  "VoiceEnabled": true,
   "VoiceIdleMinutes": 60,
   "MaxVoiceSessions": 25,
   "DisableMessageContentIntent": false,

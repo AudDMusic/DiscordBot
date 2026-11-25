@@ -42,8 +42,7 @@ type BotConfig struct {
 
 	SentryDSN string `json:"SentryDSN"` // or SENTRY_DSN
 
-	// VoiceEnabled turns on /listen, /song-vc and /disconnect. See the README:
-	// Discord requires the DAVE protocol for voice, which discordgo doesn't support yet.
+	// VoiceEnabled turns on /listen, /song-vc and /disconnect.
 	VoiceEnabled bool `json:"VoiceEnabled"`
 	// VoiceIdleMinutes is how long a /listen session may stay unused before the bot leaves.
 	VoiceIdleMinutes int `json:"VoiceIdleMinutes"`
