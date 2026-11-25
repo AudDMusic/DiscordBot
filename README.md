@@ -30,7 +30,7 @@ and text triggers work in DMs and in the messages that mention the bot. Restart 
 
 ### Voice channels
 - To recognize music from a voice channel, send `!song @mention` or use the `/song-vc` slash command, mentioning the person who is playing the song (like `!song @MusicBot`).
-- If you want the bot to stay in the channel so it can immediately recognize the song from the last 12 seconds of audio, type `!listen` or use `/listen`. `/disconnect` makes it leave. It also leaves on its own when everyone else has left or when it hasn't been used for `VoiceIdleMinutes`.
+- If you want the bot to stay in the channel so it can immediately recognize the song from the last 12 seconds of audio, type `!listen` or use `/listen`. `/disconnect` makes it leave. Pressing **Invite to Voice** in a voice channel and picking the bot does the same as `/listen`: Discord sends the bot a direct message with an invite to the channel, and the bot joins it if the person who invited it is there. It also leaves on its own when everyone else has left or when it hasn't been used for `VoiceIdleMinutes`.
 
 Discord's voice channels are end-to-end encrypted with its DAVE protocol. The bot handles that through
 [`github.com/Mihonarium/discordgo`](https://github.com/Mihonarium/discordgo), a fork of discordgo with DAVE support,
