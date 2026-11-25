@@ -4,11 +4,15 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"log"
+	"sort"
+	"strings"
 	"sync"
 	"time"
 
-	"github.com/bwmarrin/discordgo"
+	"github.com/Mihonarium/discordgo"
+	davesession "github.com/thomas-vilte/dave-go/session"
 	"layeh.com/gopus"
 )
 
@@ -118,20 +122,21 @@ type voiceSession struct {
 	closeOnce          sync.Once
 	skipUser           func(userID string) bool
 
+	// userOf tells whose audio a stream (SSRC) is, "" if that isn't known.
+	userOf func(ssrc uint32) string
+
 	mu       sync.Mutex
-	ssrcUser map[uint32]string
 	streams  map[uint32]*pcmStream
 	packets  int
 	lastUsed time.Time
 }
 
-func (vs *voiceSession) onSpeaking(_ *discordgo.VoiceConnection, update *discordgo.VoiceSpeakingUpdate) {
-	if update == nil || update.UserID == "" {
-		return
+// user returns whose audio the stream is ("" until Discord has said so).
+func (vs *voiceSession) user(ssrc uint32) string {
+	if vs.userOf == nil {
+		return ""
 	}
-	vs.mu.Lock()
-	vs.ssrcUser[uint32(update.SSRC)] = update.UserID
-	vs.mu.Unlock()
+	return vs.userOf(ssrc)
 }
 
 func (vs *voiceSession) run(recv <-chan *discordgo.Packet) {
@@ -155,7 +160,7 @@ func (vs *voiceSession) handlePacket(p *discordgo.Packet) {
 	vs.mu.Lock()
 	defer vs.mu.Unlock()
 	now := time.Now()
-	if userID, known := vs.ssrcUser[p.SSRC]; known && vs.skipUser != nil && vs.skipUser(userID) {
+	if userID := vs.user(p.SSRC); userID != "" && vs.skipUser != nil && vs.skipUser(userID) {
 		delete(vs.streams, p.SSRC) // this user has opted out: keep nothing
 		return
 	}
@@ -190,24 +195,38 @@ func (vs *voiceSession) handlePacket(p *discordgo.Packet) {
 func (vs *voiceSession) audioOf(userID string) (samples []int16, packets int) {
 	vs.mu.Lock()
 	defer vs.mu.Unlock()
+	if userID == "" {
+		return nil, vs.packets
+	}
 	now := time.Now()
 	var newest time.Time
 	for ssrc, st := range vs.streams {
-		if vs.ssrcUser[ssrc] == userID && st.lastPacket.After(newest) {
+		if vs.user(ssrc) == userID && st.lastPacket.After(newest) {
 			if snapshot := st.snapshot(now); snapshot != nil {
 				samples, newest = snapshot, st.lastPacket
 			}
 		}
 	}
-	if samples == nil && len(vs.streams) == 1 && vs.skipUser == nil {
-		// Only one participant is making any sound and Discord hasn't told us who that is.
-		for ssrc, st := range vs.streams {
-			if _, known := vs.ssrcUser[ssrc]; !known {
-				samples = st.snapshot(now)
-			}
+	return samples, vs.packets
+}
+
+// otherSpeakers lists the users, other than the given one, the bot has at least a second of fresh audio from.
+func (vs *voiceSession) otherSpeakers(userID string) []string {
+	vs.mu.Lock()
+	defer vs.mu.Unlock()
+	now := time.Now()
+	var others []string
+	for ssrc, st := range vs.streams {
+		other := vs.user(ssrc)
+		if other == "" || other == userID || stringInSlice(others, other) {
+			continue
+		}
+		if len(st.snapshot(now)) >= voiceSampleRate {
+			others = append(others, other)
 		}
 	}
-	return samples, vs.packets
+	sort.Strings(others)
+	return others
 }
 
 // record waits until there are RecordSeconds of audio from the user, but no longer than RecordSeconds.
@@ -235,6 +254,42 @@ func (vs *voiceSession) record(ctx context.Context, userID string) []int16 {
 			return samples
 		}
 	}
+}
+
+// summary describes how a capture went, for the log: how much audio arrived and
+// whether the end-to-end encryption was working. It names no users.
+func (vs *voiceSession) summary(samples int) string {
+	vs.mu.Lock()
+	packets, speakers, known := vs.packets, len(vs.streams), 0
+	for ssrc := range vs.streams {
+		if vs.user(ssrc) != "" {
+			known++
+		}
+	}
+	vs.mu.Unlock()
+	text := fmt.Sprintf("%.1fs of audio for the requested speaker, %d packets decoded from %d speakers, %d speakers identified",
+		float64(samples)/voiceSampleRate, packets, speakers, known)
+	if vs.vc == nil {
+		return text
+	}
+	text += "; " + receiveSummary(vs.vc.ReceiveStats())
+	if dave, ok := vs.vc.DAVE().(*davesession.Session); ok {
+		state, stats := dave.State(), dave.Stats()
+		text += fmt.Sprintf("; encryption ready=%v epoch=%d protocol=%d, %d frames could not be decrypted",
+			state.Ready, state.EpochID, state.ProtocolVersion, stats.DecryptFailures)
+	}
+	return text
+}
+
+// receiveSummary says where the packets from the voice server ended up.
+func receiveSummary(r discordgo.VoiceReceiveStats) string {
+	text := fmt.Sprintf("received %d packets from the voice server: %d delivered, %d not audio, %d empty, "+
+		"%d failed transport decryption, %d failed end-to-end decryption, %d from streams with no known user; %d speaking updates",
+		r.Packets, r.Delivered, r.NotAudio, r.Empty, r.TransportFailed, r.DAVEFailed, r.UnknownUser, r.SpeakingUpdates)
+	if r.LastDAVEError != "" {
+		text += "; last end-to-end error: " + r.LastDAVEError
+	}
+	return text
 }
 
 // info returns who started the session with /listen (if anyone) and whether it stays after a recognition.
@@ -329,10 +384,11 @@ func (vm *voiceManager) join(s *discordgo.Session, guildID, channelID, invitedBy
 	}
 	vs := &voiceSession{
 		guildID: guildID, channelID: channelID, invitedBy: invitedBy, persistent: persistent, vc: vc,
-		done: make(chan struct{}), ssrcUser: map[uint32]string{}, streams: map[uint32]*pcmStream{},
+		done: make(chan struct{}), streams: map[uint32]*pcmStream{},
 		lastUsed: time.Now(), skipUser: vm.skipUser,
+		// The library keeps track of whose audio each stream is: it needs that to decrypt it.
+		userOf: vc.UserIDForSSRC,
 	}
-	vc.AddHandler(vs.onSpeaking)
 	var recv chan *discordgo.Packet
 	for i := 0; i < 20 && recv == nil; i++ { // the channel is created when the UDP connection is up
 		vc.RLock()
@@ -518,11 +574,18 @@ func (b *Bot) SongVCCommand(ctx context.Context, s *discordgo.Session, userID, u
 		return true, textMessage("Sorry, I couldn't join the voice channel", reference)
 	}
 	samples := vs.record(ctx, userToListenToID)
+	log.Println("Voice capture:", vs.summary(len(samples)))
 	if _, persistent := vs.info(); !persistent {
 		b.voice.leave(guildID, vs) // nobody asked the bot to stay with /listen
 	}
 	if len(samples) < voiceSampleRate { // less than a second
-		return true, textMessage(replyNoCapture, reference)
+		text := replyNoCapture
+		if others := vs.otherSpeakers(userToListenToID); len(others) > 0 {
+			// The reply can't ping anyone, so the mentions only show the names.
+			text = "I didn't hear anything from <@" + userToListenToID + "> in the last 12 seconds, but I can hear <@" +
+				strings.Join(others, ">, <@") + ">. Try **/song-vc** again and pick who's playing the music."
+		}
+		return true, textMessage(text, reference)
 	}
 	return true, b.recognizeFromAudio(ctx, encodeWAV(samples, voiceSampleRate), reference, canCompress)
 }
@@ -533,20 +596,29 @@ func (b *Bot) ListenCommand(s *discordgo.Session, guildID, userID string) string
 	if channelID == "" {
 		return "Sorry, I can't find a voice channel you're in"
 	}
+	if joined, problem := b.listen(s, guildID, channelID, userID); !joined {
+		return problem
+	}
+	return "Listening!\nUse **/song-vc** and pick who's playing the music, and I'll identify the song from the last 12 seconds."
+}
+
+// listen makes the bot join the voice channel and stay there, on behalf of the user.
+// When it can't, the text says why.
+func (b *Bot) listen(s *discordgo.Session, guildID, channelID, userID string) (joined bool, problem string) {
 	if !b.limiter.Allow("listen:"+userID, 6, time.Minute) {
-		return replyUserLimited
+		return false, replyUserLimited
 	}
 	_, _, err := b.voice.join(s, guildID, channelID, userID, true)
 	switch {
 	case errors.Is(err, errVoiceBusy):
-		return "Sorry, I'm already listening to another voice channel on this server"
+		return false, "Sorry, I'm already listening to another voice channel on this server"
 	case errors.Is(err, errVoiceCapacity):
-		return "Sorry, I'm in too many voice channels right now. Please try again later."
+		return false, "Sorry, I'm in too many voice channels right now. Please try again later."
 	case err != nil:
 		log.Println("can't join a voice channel:", err)
-		return "Sorry, I couldn't join the voice channel"
+		return false, "Sorry, I couldn't join the voice channel. Please check that I'm allowed to connect to it."
 	}
-	return "Listening!\nType !song with a mention to recognize a song played by someone mentioned."
+	return true, ""
 }
 
 // StopListeningCommand makes the bot leave the voice channel if the user is allowed to ask for that.

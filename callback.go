@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"github.com/AudDMusic/audd-go"
-	"github.com/bwmarrin/discordgo"
+	"github.com/Mihonarium/discordgo"
 )
 
 const maxCallbackBody = 1 << 20

@@ -9,17 +9,19 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"syscall"
 	"time"
 
 	"github.com/AudDMusic/audd-go"
-	"github.com/bwmarrin/discordgo"
+	"github.com/Mihonarium/discordgo"
 	"github.com/getsentry/sentry-go"
+	davesession "github.com/thomas-vilte/dave-go/session"
 )
 
-const release = "discord-bot@0.1.0"
+const release = "discord-bot@0.2.0"
 
 // exitConfig is the exit status for the problems a restart can't fix (a broken config, a rejected
 // token), so that a service manager can be told not to restart the bot in a loop.
@@ -52,6 +54,7 @@ type Bot struct {
 	// contentIntent tells whether the bot receives the text of messages that don't mention it.
 	contentIntent bool
 
+	sessionsMu         sync.RWMutex
 	sessions           []*discordgo.Session
 	commandsRegistered atomic.Bool
 
@@ -128,6 +131,8 @@ func main() {
 		cancel()
 	}
 	time.Sleep(500 * time.Millisecond) // let the voice disconnects go out
+	bot.sessionsMu.RLock()
+	defer bot.sessionsMu.RUnlock()
 	for _, s := range bot.sessions {
 		_ = s.Close()
 	}
@@ -164,8 +169,13 @@ func (b *Bot) newSession(shardID, shardCount int) (*discordgo.Session, error) {
 	s.AddHandler(b.onGuildCreate)
 	s.AddHandler(b.onGuildDelete)
 	s.AddHandler(b.onInteractionCreate)
+	if b.cfg.DebugGatewayEvents {
+		s.AddHandler(b.onRawEvent)
+	}
 	if b.cfg.VoiceEnabled {
 		s.AddHandler(b.onVoiceStateUpdate)
+		// Discord's voice channels are end-to-end encrypted (DAVE); this is the session that does it.
+		s.DAVESessionCreate = davesession.CreateFunc()
 	}
 	return s, nil
 }
@@ -213,7 +223,9 @@ func (b *Bot) openSessions(ctx context.Context) error {
 		if err := s.Open(); err != nil {
 			return fmt.Errorf("can't open shard %d: %w", shardID, err)
 		}
+		b.sessionsMu.Lock()
 		b.sessions = append(b.sessions, s)
+		b.sessionsMu.Unlock()
 		log.Printf("Opened shard %d of %d", shardID+1, shardCount)
 		if shardID < shardCount-1 {
 			select { // Discord allows one new gateway session per 5 seconds
@@ -228,10 +240,32 @@ func (b *Bot) openSessions(ctx context.Context) error {
 
 // rest returns a session to use for the requests that don't depend on the shard.
 func (b *Bot) rest() *discordgo.Session {
+	b.sessionsMu.RLock()
+	defer b.sessionsMu.RUnlock()
 	if len(b.sessions) == 0 {
 		return nil
 	}
 	return b.sessions[0]
+}
+
+// sessionForGuild returns the session of the shard the server is on, or nil while
+// that shard is still connecting. Direct messages always arrive on the first shard,
+// so anything they say about a server may belong to another one.
+func (b *Bot) sessionForGuild(guildID string) *discordgo.Session {
+	id, err := strconv.ParseUint(guildID, 10, 64)
+	if err != nil {
+		return nil
+	}
+	b.sessionsMu.RLock()
+	defer b.sessionsMu.RUnlock()
+	if len(b.sessions) == 0 {
+		return nil
+	}
+	shard := int((id >> 22) % uint64(max(b.sessions[0].ShardCount, 1)))
+	if shard >= len(b.sessions) {
+		return nil
+	}
+	return b.sessions[shard]
 }
 
 func (b *Bot) janitor(ctx context.Context) {

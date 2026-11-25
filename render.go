@@ -7,8 +7,8 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/Mihonarium/discordgo"
 	"github.com/Mihonarium/go-profanity"
-	"github.com/bwmarrin/discordgo"
 )
 
 // Song is one recognized song, ready to be shown.

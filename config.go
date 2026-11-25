@@ -42,8 +42,7 @@ type BotConfig struct {
 
 	SentryDSN string `json:"SentryDSN"` // or SENTRY_DSN
 
-	// VoiceEnabled turns on /listen, /song-vc and /disconnect. See the README:
-	// Discord requires the DAVE protocol for voice, which discordgo doesn't support yet.
+	// VoiceEnabled turns on /listen, /song-vc and /disconnect.
 	VoiceEnabled bool `json:"VoiceEnabled"`
 	// VoiceIdleMinutes is how long a /listen session may stay unused before the bot leaves.
 	VoiceIdleMinutes int `json:"VoiceIdleMinutes"`
@@ -62,6 +61,10 @@ type BotConfig struct {
 	RateLimits RateLimitConfig `json:"RateLimits"`
 	// ResultCacheMinutes is how long a result for the same link is reused. Negative disables the cache.
 	ResultCacheMinutes int `json:"ResultCacheMinutes"`
+
+	// DebugGatewayEvents logs the gateway events the library doesn't know and the shape (not the
+	// text) of direct messages. It is for finding out what Discord sends for undocumented features.
+	DebugGatewayEvents bool `json:"DebugGatewayEvents"`
 
 	// OptOutFile is where the IDs of the users who opted out with /privacy are kept.
 	OptOutFile string `json:"OptOutFile"`

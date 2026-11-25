@@ -20,7 +20,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/AudDMusic/audd-go"
-	"github.com/bwmarrin/discordgo"
+	"github.com/Mihonarium/discordgo"
 )
 
 func TestTimeParsing(t *testing.T) {
@@ -534,17 +534,38 @@ func TestVoiceBuffer(t *testing.T) {
 	}
 
 	// The audio is attributed through the speaking updates.
-	vs := &voiceSession{done: make(chan struct{}), ssrcUser: map[uint32]string{}, streams: map[uint32]*pcmStream{}}
+	users := map[uint32]string{}
+	vs := &voiceSession{done: make(chan struct{}), streams: map[uint32]*pcmStream{}, userOf: func(ssrc uint32) string { return users[ssrc] }}
 	vs.streams[7] = &pcmStream{}
 	vs.streams[7].write(0, frame(1), time.Now())
 	vs.streams[8] = &pcmStream{}
 	vs.streams[8].write(0, frame(2), time.Now())
-	vs.onSpeaking(nil, &discordgo.VoiceSpeakingUpdate{UserID: "music-bot", SSRC: 8})
+	if samples, _ := vs.audioOf("music-bot"); samples != nil {
+		t.Errorf("audio was attributed to a user before Discord said whose it is")
+	}
+	users[8] = "music-bot"
 	if samples, _ := vs.audioOf("music-bot"); len(samples) != 960 || samples[0] != 2 {
 		t.Errorf("wrong audio for the speaker")
 	}
 	if samples, _ := vs.audioOf("someone-else"); samples != nil {
 		t.Errorf("audio was returned for a user who isn't speaking")
+	}
+	if samples, _ := vs.audioOf(""); samples != nil {
+		t.Errorf("audio of an unidentified stream was returned")
+	}
+	// When the picked user is silent, the bot can say who it does hear.
+	users[7] = "dj"
+	for i := uint32(1); i <= 60; i++ { // 1.2 seconds
+		vs.streams[7].write(i*960, frame(1), time.Now())
+	}
+	if others := vs.otherSpeakers("music-bot"); len(others) != 1 || others[0] != "dj" {
+		t.Errorf("otherSpeakers = %v; want [dj]", others)
+	}
+	if others := vs.otherSpeakers("dj"); len(others) != 0 { // music-bot has only 20 ms buffered
+		t.Errorf("otherSpeakers = %v; want none", others)
+	}
+	if got := vs.summary(0); !strings.HasPrefix(got, "0.0s of audio for the requested speaker") || !strings.Contains(got, "2 speakers identified") {
+		t.Errorf("unexpected capture summary: %s", got)
 	}
 }
 
@@ -680,10 +701,96 @@ func TestOptOut(t *testing.T) {
 	}
 
 	// The audio of someone who opted out isn't kept in a voice session.
-	vs := &voiceSession{done: make(chan struct{}), ssrcUser: map[uint32]string{5: "111111111111111111"},
+	vs := &voiceSession{done: make(chan struct{}), userOf: func(uint32) string { return "111111111111111111" },
 		streams: map[uint32]*pcmStream{5: {}}, skipUser: reloaded.Has}
 	vs.handlePacket(&discordgo.Packet{SSRC: 5, Opus: []byte{0xf8, 0xff, 0xfe}})
 	if len(vs.streams) != 0 {
 		t.Error("audio of an opted-out user was kept")
+	}
+}
+
+func TestVoiceInvite(t *testing.T) {
+	for text, want := range map[string]string{
+		"https://discord.gg/yhKwAvy4N":                     "yhKwAvy4N",
+		"join us: https://discord.com/invite/abc-DEF now":  "abc-DEF",
+		"discord.gg/audd":                                  "audd",
+		"https://www.discordapp.com/invite/K44Pf5maUq?x=1": "K44Pf5maUq",
+		"https://notdiscord.gg/abc":                        "",
+		"https://discord.gg/":                              "",
+		"https://example.com/discord.gg":                   "",
+		"!song":                                            "",
+	} {
+		if got := inviteCode(text); got != want {
+			t.Errorf("inviteCode(%q) = %q; want %q", text, got, want)
+		}
+	}
+
+	// A session with a server the bot is on: user 5 is in voice channel 20.
+	gs, err := discordgo.New("Bot x")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := gs.State.GuildAdd(&discordgo.Guild{ID: "10", VoiceStates: []*discordgo.VoiceState{
+		{GuildID: "10", UserID: "5", ChannelID: "20"}, {GuildID: "10", UserID: "6", ChannelID: "21"},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	bot := &Bot{cfg: &BotConfig{VoiceEnabled: true}}
+	invite := func(guildID, channelID string, channelType discordgo.ChannelType) *discordgo.Invite {
+		return &discordgo.Invite{Guild: &discordgo.Guild{ID: guildID}, Channel: &discordgo.Channel{ID: channelID, Type: channelType}}
+	}
+	voice := discordgo.ChannelTypeGuildVoice
+	for name, tc := range map[string]struct {
+		session *discordgo.Session
+		invite  *discordgo.Invite
+		userID  string
+		want    string // a part of the reply; "" means the bot may join
+	}{
+		"the inviter is in the channel":        {gs, invite("10", "20", voice), "5", ""},
+		"a stage channel":                      {gs, invite("10", "20", discordgo.ChannelTypeGuildStageVoice), "5", ""},
+		"the inviter is in another channel":    {gs, invite("10", "20", voice), "6", "Join that voice channel first"},
+		"the inviter is not in voice":          {gs, invite("10", "20", voice), "7", "Join that voice channel first"},
+		"a text channel":                       {gs, invite("10", "30", discordgo.ChannelTypeGuildText), "5", "can't join a server through an invite link"},
+		"a server the bot is not on":           {gs, invite("11", "20", voice), "5", "not on that server yet"},
+		"the shard is still connecting":        {nil, invite("10", "20", voice), "5", "still starting up"},
+		"an invite without a channel":          {gs, &discordgo.Invite{Guild: &discordgo.Guild{ID: "10"}}, "5", "doesn't work anymore"},
+		"a group DM invite (no server at all)": {gs, &discordgo.Invite{Channel: &discordgo.Channel{ID: "20", Type: voice}}, "5", "doesn't work anymore"},
+	} {
+		got := bot.voiceInviteProblem(tc.session, tc.invite, tc.userID, "999")
+		if tc.want == "" && got != "" || tc.want != "" && !strings.Contains(got, tc.want) {
+			t.Errorf("%s: got %q; want %q", name, got, tc.want)
+		}
+	}
+	if link := addBotLink("999"); !strings.Contains(link, "client_id=999") {
+		t.Errorf("unexpected link to add the bot: %s", link)
+	}
+
+	// Direct messages always arrive on the first shard; the server may be on another one.
+	first, second := &discordgo.Session{ShardCount: 2}, &discordgo.Session{ShardID: 1, ShardCount: 2}
+	bot.sessions = []*discordgo.Session{first, second}
+	if bot.sessionForGuild("731869831183335484") != bot.sessions[(731869831183335484>>22)%2] {
+		t.Error("the wrong shard was picked for a server")
+	}
+	bot.sessions = bot.sessions[:1] // the second shard is still connecting
+	for _, id := range []string{"0", "4194304"} {
+		want := first
+		if id == "4194304" { // (4194304 >> 22) % 2 == 1
+			want = nil
+		}
+		if got := bot.sessionForGuild(id); got != want {
+			t.Errorf("sessionForGuild(%s) = %v; want %v", id, got, want)
+		}
+	}
+	if bot.sessionForGuild("not a number") != nil {
+		t.Error("a session was returned for an incorrect server ID")
+	}
+
+	// The debug log lists which fields of a message are set, without their values.
+	keys := keysWithValue(map[string]json.RawMessage{
+		"content": json.RawMessage(`"secret text"`), "embeds": json.RawMessage(`[]`), "flags": json.RawMessage(`0`),
+		"tts": json.RawMessage(`false`), "nonce": json.RawMessage(`null`), "type": json.RawMessage(`19`),
+	})
+	if strings.Join(keys, " ") != "content type" {
+		t.Errorf("keysWithValue = %v", keys)
 	}
 }

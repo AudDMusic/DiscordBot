@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/bwmarrin/discordgo"
+	"github.com/Mihonarium/discordgo"
 )
 
 const helpIntro = "👋 Hi! I'm a music recognition bot.\n\n" +
@@ -16,13 +16,18 @@ const helpIntro = "👋 Hi! I'm a music recognition bot.\n\n" +
 	"bot will identify the music. Or make a right click on the message and pick Apps -> Recognize This Song. " +
 	"You can add a timestamp (like **!song 1:25**) or **at the end** to pick the part of the file to listen to.\n\n"
 
-const helpVoice = "When you're on a voice channel and someone is playing music there, type the slash **/song-vc [mention]** command, " +
-	"mentioning the user playing the music (**!song [mention]** also works). The bot will record the sound for 12 seconds and then attempt to " +
-	"identify the song.\n\n" +
-	"On a voice channel, you can also use the slash **/listen** command (or **!listen**), and the bot will join the VC, " +
-	"listen, and keep the last 12 seconds " +
-	"of audio in its memory, and when you type **/song-vc [mention]** (or **!song [mention]**), it will immediately identify music from the last 12 " +
-	"seconds of what the mentioned user or bot has played on the voice channel. If you send **/disconnect**, the bot will leave the VC.\n\n"
+// helpVoice explains the voice commands. The !commands only reach the bot when it can read messages.
+func helpVoice(contentIntent bool) string {
+	also, orListen := "", ""
+	if contentIntent {
+		also, orListen = " (**!song @mention** also works)", " (or **!listen**)"
+	}
+	return "When you're on a voice channel and someone is playing music there, use **/song-vc** and pick who's playing the music" + also +
+		". I'll record the sound for 12 seconds and then try to identify the song.\n\n" +
+		"To have me stay on the voice channel, use **/listen**" + orListen + ", or press **Invite to Voice** there and pick me. " +
+		"I keep the last 12 seconds of audio in memory, so **/song-vc** then identifies the song right away. " +
+		"**/disconnect** makes me leave.\n\n"
+}
 
 const helpOutro = "If you don't want me to read your messages, use **/privacy opt-out**. " +
 	"Privacy policy: <" + privacyPolicyURL + ">. Source code: <https://github.com/AudDMusic/DiscordBot>.\n\n" +
@@ -39,7 +44,7 @@ func (b *Bot) helpText() string {
 		intro = helpIntroNoContent
 	}
 	if b.cfg.VoiceEnabled {
-		return intro + helpVoice + helpOutro
+		return intro + helpVoice(b.contentIntent) + helpOutro
 	}
 	return intro + helpOutro
 }

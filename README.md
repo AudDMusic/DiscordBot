@@ -30,13 +30,16 @@ and text triggers work in DMs and in the messages that mention the bot. Restart 
 
 ### Voice channels
 - To recognize music from a voice channel, send `!song @mention` or use the `/song-vc` slash command, mentioning the person who is playing the song (like `!song @MusicBot`).
-- If you want the bot to stay in the channel so it can immediately recognize the song from the last 12 seconds of audio, type `!listen` or use `/listen`. `/disconnect` makes it leave. It also leaves on its own when everyone else has left or when it hasn't been used for `VoiceIdleMinutes`.
+- If you want the bot to stay in the channel so it can immediately recognize the song from the last 12 seconds of audio, type `!listen` or use `/listen`. `/disconnect` makes it leave. Pressing **Invite to Voice** in a voice channel and picking the bot does the same as `/listen`: Discord sends the bot a direct message with an invite to the channel, and the bot joins it if the person who invited it is there. It also leaves on its own when everyone else has left or when it hasn't been used for `VoiceIdleMinutes`.
 
-> [!IMPORTANT]
-> The voice commands are off by default (`"VoiceEnabled": false`). Since March 2026, Discord only accepts voice
-> connections that support its end-to-end encryption protocol (DAVE), and [discordgo](https://github.com/bwmarrin/discordgo),
-> the library this bot uses, [doesn't support it yet](https://github.com/bwmarrin/discordgo/issues/1697). Until it does,
-> the bot can't join voice channels: with `VoiceEnabled` set to `true`, the commands appear but fail to connect.
+Discord's voice channels are end-to-end encrypted with its DAVE protocol. The bot handles that through
+[`github.com/Mihonarium/discordgo`](https://github.com/Mihonarium/discordgo), a fork of discordgo with DAVE support,
+and [`dave-go`](https://github.com/thomas-vilte/dave-go), a pure Go implementation of the encryption. The voice
+commands are registered when `"VoiceEnabled": true` is in the config.
+
+To check voice from a terminal, `go run ./cmd/voicetest -config config.json -guild <server ID>` lists the server's
+voice channels, and adding `-channel <channel ID>` joins one and reports how the encryption handshake goes and
+whether the audio it receives decodes.
 
 ## Running it as a service
 [`discordbot.service`](discordbot.service) is a systemd unit with a sandbox and memory limits. Adjust the paths and the
