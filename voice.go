@@ -577,7 +577,6 @@ func (b *Bot) listen(s *discordgo.Session, guildID, channelID, userID string) (j
 	return true, ""
 }
 
-
 // StopListeningCommand makes the bot leave the voice channel if the user is allowed to ask for that.
 func (b *Bot) StopListeningCommand(s *discordgo.Session, guildID, userID string) (left bool, response string) {
 	vs := b.voice.get(guildID)
