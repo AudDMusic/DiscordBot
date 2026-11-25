@@ -102,7 +102,7 @@ func (s *optOutStore) Set(userID string, optedOut bool) error {
 const (
 	replyOptedOut = "Done. I won't read your messages or listen to you in voice channels anymore, " +
 		"and other people can't ask me to identify music from your messages. " +
-		"To remember this, I keep your user ID. You can undo it at any time with `/privacy opt-in`."
+		"To remember this, I keep your user ID. To undo it, use /privacy again and pick opt-in."
 	replyOptedIn        = "Done. You're opted back in, and your user ID is removed from the opt-out list."
 	replyAuthorOptedOut = "The author of that message has asked me not to process their messages."
 )
