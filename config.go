@@ -51,8 +51,10 @@ type BotConfig struct {
 	MaxVoiceSessions int `json:"MaxVoiceSessions"`
 
 	// DisableMessageContentIntent stops the bot from requesting the privileged
-	// Message Content intent. Text triggers then only work in DMs and in
-	// messages that mention the bot; slash and context-menu commands still work.
+	// Message Content intent even when Discord has granted it. (When Discord
+	// hasn't, the bot notices at startup and doesn't request it.) Text triggers
+	// then only work in DMs and in messages that mention the bot; slash and
+	// context-menu commands still work.
 	DisableMessageContentIntent bool `json:"DisableMessageContentIntent"`
 	// ShardCount is the number of gateway shards. 0 uses Discord's recommendation.
 	ShardCount int `json:"ShardCount"`

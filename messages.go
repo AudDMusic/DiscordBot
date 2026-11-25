@@ -131,8 +131,14 @@ func (b *Bot) handleTrigger(s *discordgo.Session, m *discordgo.Message, compare,
 
 	if !b.cfg.VoiceEnabled || m.GuildID == "" {
 		if isShort {
-			b.reply(m.ChannelID, textMessage("Please reply with !song to a message with an audio or video file or "+
-				"a link to it and I'll identify the music", m.Reference()))
+			hint := "Please reply with !song to a message with an audio or video file or " +
+				"a link to it and I'll identify the music"
+			if !b.contentIntent && m.GuildID != "" {
+				// Without the Message Content intent, Discord doesn't show the bot the other messages.
+				hint = "I can't see the message with the audio or video from here. Right-click it " +
+					"(long-press on a phone) and pick Apps -> Recognize This Song, and I'll identify the music."
+			}
+			b.reply(m.ChannelID, textMessage(hint, m.Reference()))
 		}
 		return
 	}

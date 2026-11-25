@@ -18,9 +18,9 @@ A music recognition bot for Discord. Uses the [Music Recognition API](https://au
 - Open `https://discord.com/api/oauth2/authorize?client_id=<INSERT CLIENT ID HERE>&permissions=277026819136&scope=bot%20applications.commands` and add the bot to a server.
 
 **To identify music from the messages you reply to with "!song", the bot needs the privileged Message Content intent**
-(Bot -> Privileged Gateway Intents in the Discord developer portal). If you don't have it, set
-`"DisableMessageContentIntent": true`: the "Recognize This Song" context-menu command and the slash commands still work,
-and text triggers work in DMs and in the messages that mention the bot.
+(Bot -> Privileged Gateway Intents in the Discord developer portal). The bot checks at startup whether Discord has
+granted it. Without it, the bot still runs: the "Recognize This Song" context-menu command and the slash commands work,
+and text triggers work in DMs and in the messages that mention the bot. Restart the bot after the intent is granted.
 
 ## How to use it
 - To identify a song from an audio/video file or a link, reply to it with `!song` or right-click on the message and pick Apps -> Recognize This Song.
@@ -37,6 +37,11 @@ and text triggers work in DMs and in the messages that mention the bot.
 > connections that support its end-to-end encryption protocol (DAVE), and [discordgo](https://github.com/bwmarrin/discordgo),
 > the library this bot uses, [doesn't support it yet](https://github.com/bwmarrin/discordgo/issues/1697). Until it does,
 > the bot can't join voice channels: with `VoiceEnabled` set to `true`, the commands appear but fail to connect.
+
+## Running it as a service
+[`discordbot.service`](discordbot.service) is a systemd unit with a sandbox and memory limits. Adjust the paths and the
+user in it, copy it to `/etc/systemd/system/` and run `systemctl enable --now discordbot`. The bot exits with status 78
+when its config is broken or Discord rejects its token, and the unit doesn't restart it in that case.
 
 ## Limits and abuse prevention
 Every recognition is an API request, so the bot limits how many of them one user or one server can cause. The defaults

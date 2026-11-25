@@ -21,6 +21,20 @@ import (
 
 const release = "discord-bot@0.1.0"
 
+// exitConfig is the exit status for the problems a restart can't fix (a broken config, a rejected
+// token), so that a service manager can be told not to restart the bot in a loop.
+const exitConfig = 78
+
+// Application flags that say the bot may use the Message Content intent (approved, or under 100 servers).
+const messageContentFlags = 1<<18 | 1<<19
+
+var errBadToken = errors.New("Discord rejected the bot token")
+
+func isUnauthorized(err error) bool {
+	var restErr *discordgo.RESTError
+	return errors.As(err, &restErr) && restErr.Response != nil && restErr.Response.StatusCode == http.StatusUnauthorized
+}
+
 // Bot holds everything the handlers share.
 type Bot struct {
 	cfg     *BotConfig
@@ -34,6 +48,9 @@ type Bot struct {
 
 	blockedUsers  map[string]bool
 	blockedGuilds map[string]bool
+
+	// contentIntent tells whether the bot receives the text of messages that don't mention it.
+	contentIntent bool
 
 	sessions           []*discordgo.Session
 	commandsRegistered atomic.Bool
@@ -71,7 +88,8 @@ func main() {
 
 	cfg, err := loadConfig(*configPath)
 	if err != nil {
-		log.Fatalln("Can't load the config:", err)
+		log.Println("Can't load the config:", err)
+		os.Exit(exitConfig)
 	}
 	if err := sentry.Init(sentry.ClientOptions{Dsn: cfg.SentryDSN, Release: release, AttachStacktrace: true}); err != nil {
 		log.Println("Can't initialize Sentry:", err)
@@ -84,10 +102,16 @@ func main() {
 	bot := newBot(cfg)
 	// Without the opt-out list the bot could process the messages of the people who opted out: don't start.
 	if bot.optOuts, err = loadOptOuts(cfg.OptOutFile); err != nil {
-		log.Fatalln("Can't load the opt-out list:", err)
+		log.Println("Can't load the opt-out list:", err)
+		os.Exit(exitConfig)
 	}
 	bot.voice.skipUser = bot.optOuts.Has
 	if err := bot.openSessions(ctx); err != nil {
+		if errors.Is(err, errBadToken) {
+			log.Println("Discord rejected the bot token. Put a valid one into DiscordToken in the config " +
+				"(Discord Developer Portal -> your application -> Bot -> Reset Token) and start the bot again.")
+			os.Exit(exitConfig)
+		}
 		capture(err)
 		sentry.Flush(5 * time.Second)
 		log.Fatalln("Can't connect to Discord:", err)
@@ -114,7 +138,7 @@ func (b *Bot) intents() discordgo.Intent {
 	if b.cfg.VoiceEnabled {
 		intents |= discordgo.IntentsGuildVoiceStates
 	}
-	if !b.cfg.DisableMessageContentIntent {
+	if b.contentIntent {
 		intents |= discordgo.IntentsMessageContent
 	}
 	return intents
@@ -148,15 +172,36 @@ func (b *Bot) newSession(shardID, shardCount int) (*discordgo.Session, error) {
 
 // openSessions connects to the gateway with as many shards as needed.
 func (b *Bot) openSessions(ctx context.Context) error {
+	probe, err := b.newSession(0, 1)
+	if err != nil {
+		return err
+	}
+	// Asking for an intent Discord hasn't granted makes it refuse the connection,
+	// so check what the application is allowed to use first.
+	app, err := probe.Application("@me")
+	switch {
+	case isUnauthorized(err):
+		return errBadToken
+	case err != nil:
+		log.Println("Can't check which intents the application has, going by the config:", err)
+		b.contentIntent = !b.cfg.DisableMessageContentIntent
+	default:
+		granted := app.Flags&messageContentFlags != 0
+		b.contentIntent = granted && !b.cfg.DisableMessageContentIntent
+		if !granted {
+			log.Println("Discord hasn't granted this application the Message Content intent: replies with " +
+				"!song won't work in servers until it does. Recognize This Song and the slash commands work. " +
+				"Restart the bot once the intent is granted.")
+		}
+	}
 	shardCount := b.cfg.ShardCount
 	if shardCount == 0 {
-		probe, err := b.newSession(0, 1)
-		if err != nil {
-			return err
-		}
 		gateway, err := probe.GatewayBot()
+		if isUnauthorized(err) {
+			return errBadToken
+		}
 		if err != nil {
-			return fmt.Errorf("can't get the gateway information (is the Discord token valid?): %w", err)
+			return fmt.Errorf("can't get the gateway information: %w", err)
 		}
 		shardCount = max(gateway.Shards, 1)
 	}

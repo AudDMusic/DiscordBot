@@ -1,0 +1,49 @@
+[Unit]
+Description=AudD Discord bot
+Documentation=https://github.com/AudDMusic/DiscordBot
+After=network-online.target
+Wants=network-online.target
+ConditionPathExists=/opt/discordbot/config.json
+# Give up after 10 failed starts in 5 minutes instead of restarting forever.
+StartLimitIntervalSec=300
+StartLimitBurst=10
+
+[Service]
+Type=simple
+User=discordbot
+Group=discordbot
+WorkingDirectory=/opt/discordbot
+ExecStart=/opt/discordbot/discordBot -config /opt/discordbot/config.json
+Restart=always
+RestartSec=10
+# 78: the config is broken or Discord rejected the token. Restarting can't fix that.
+RestartPreventExitStatus=78
+TimeoutStopSec=15
+SyslogIdentifier=discordbot
+LimitNOFILE=65536
+UMask=0077
+
+# Limits, so a problem in the bot can't take the machine down with it
+MemoryHigh=768M
+MemoryMax=1G
+TasksMax=512
+
+# Sandbox: the bot only needs the network and its own folder (it writes optouts.json there)
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/opt/discordbot
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=true
+RestrictRealtime=true
+LockPersonality=true
+SystemCallArchitectures=native
+CapabilityBoundingSet=
+
+[Install]
+WantedBy=multi-user.target

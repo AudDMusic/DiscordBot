@@ -26,13 +26,22 @@ const helpVoice = "When you're on a voice channel and someone is playing music t
 
 const helpOutro = "If you don't want me to read your messages, use **/privacy opt-out**. " +
 	"Privacy policy: <" + privacyPolicyURL + ">. Source code: <https://github.com/AudDMusic/DiscordBot>.\n\n" +
-	"Please report any bugs if you experience them. Support server: https://discord.gg/audd"
+	"Please report any bugs if you experience them. Support server: https://audd.cc/discord"
+
+// helpIntroNoContent is used while the bot can't read the messages that don't mention it.
+const helpIntroNoContent = "👋 Hi! I'm a music recognition bot.\n\n" +
+	"If you see an audio or a video and want to know what's the music, right-click the message " +
+	"(long-press on a phone) and pick Apps -> Recognize This Song.\n\n"
 
 func (b *Bot) helpText() string {
-	if b.cfg.VoiceEnabled {
-		return helpIntro + helpVoice + helpOutro
+	intro := helpIntro
+	if !b.contentIntent {
+		intro = helpIntroNoContent
 	}
-	return helpIntro + helpOutro
+	if b.cfg.VoiceEnabled {
+		return intro + helpVoice + helpOutro
+	}
+	return intro + helpOutro
 }
 
 func containsFold(s, substr string) bool {
