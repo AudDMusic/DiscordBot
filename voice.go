@@ -4,11 +4,13 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"log"
 	"sync"
 	"time"
 
 	"github.com/Mihonarium/discordgo"
+	davesession "github.com/thomas-vilte/dave-go/session"
 	"layeh.com/gopus"
 )
 
@@ -235,6 +237,22 @@ func (vs *voiceSession) record(ctx context.Context, userID string) []int16 {
 			return samples
 		}
 	}
+}
+
+// summary describes how a capture went, for the log: how much audio arrived and
+// whether the end-to-end encryption was working. It names no users.
+func (vs *voiceSession) summary(samples int) string {
+	vs.mu.Lock()
+	packets, speakers, known := vs.packets, len(vs.streams), len(vs.ssrcUser)
+	vs.mu.Unlock()
+	text := fmt.Sprintf("%.1fs of audio for the requested speaker, %d packets decoded from %d speakers, %d speakers identified",
+		float64(samples)/voiceSampleRate, packets, speakers, known)
+	if dave, ok := vs.vc.DAVE().(*davesession.Session); ok {
+		state, stats := dave.State(), dave.Stats()
+		text += fmt.Sprintf("; encryption ready=%v epoch=%d protocol=%d, %d frames could not be decrypted",
+			state.Ready, state.EpochID, state.ProtocolVersion, stats.DecryptFailures)
+	}
+	return text
 }
 
 // info returns who started the session with /listen (if anyone) and whether it stays after a recognition.
@@ -518,6 +536,7 @@ func (b *Bot) SongVCCommand(ctx context.Context, s *discordgo.Session, userID, u
 		return true, textMessage("Sorry, I couldn't join the voice channel", reference)
 	}
 	samples := vs.record(ctx, userToListenToID)
+	log.Println("Voice capture:", vs.summary(len(samples)))
 	if _, persistent := vs.info(); !persistent {
 		b.voice.leave(guildID, vs) // nobody asked the bot to stay with /listen
 	}
