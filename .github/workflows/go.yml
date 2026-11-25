@@ -6,24 +6,31 @@ on:
   pull_request:
     branches: [ master ]
 
-jobs:
+permissions:
+  contents: read
 
+jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v7
 
     - name: Set up Go
-      uses: actions/setup-go@v2
+      uses: actions/setup-go@v7
       with:
-        go-version: 1.17
+        go-version-file: go.mod
+
+    - name: Vet
+      run: go vet ./...
+
+    - name: Test
+      run: go test -race ./...
 
     - name: Build
-      run: go build -v ./...
-      
+      run: go build -v -o discordBot .
+
     - name: Upload a Build Artifact
-      uses: actions/upload-artifact@v3.0.0
+      uses: actions/upload-artifact@v7
       with:
-        # Artifact name
         name: discordBot
         path: discordBot
